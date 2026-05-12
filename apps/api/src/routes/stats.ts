@@ -76,6 +76,8 @@ export function getTopContacts(params: { period?: unknown; limit?: unknown }, db
       WHEN ${expression} IS NOT NULL
         AND TRIM(${expression}) <> ''
         AND TRIM(${expression}) NOT LIKE '%=%'
+        AND TRIM(${expression}) NOT LIKE '%GIAB%'
+        AND TRIM(${expression}) NOT LIKE '+%'
       THEN TRIM(${expression})
       ELSE NULL
     END
