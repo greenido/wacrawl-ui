@@ -139,11 +139,15 @@ export function Dashboard() {
   const [streaks, setStreaks] = useState<MessageStreaks | null>(null);
   const [wordCloudAll, setWordCloudAll] = useState<WordCloudTerm[]>([]);
   const [wordCloudUseful, setWordCloudUseful] = useState<WordCloudTerm[]>([]);
-  const [wordCloudTab, setWordCloudTab] = useState<'all' | 'useful'>('all');
+  const [wordCloudTab, setWordCloudTab] = useState<'all' | 'useful'>('useful');
   const [loadingOverview, setLoadingOverview] = useState(true);
   const [loadingCharts, setLoadingCharts] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const heatmapYear = useMemo(() => new Date().getFullYear(), []);
+
+  function openWordSearch(term: string) {
+    navigate(`/search?q=${encodeURIComponent(term)}`);
+  }
 
   useEffect(() => {
     let active = true;
@@ -323,22 +327,6 @@ export function Dashboard() {
               <button
                 type="button"
                 role="tab"
-                aria-selected={wordCloudTab === 'all'}
-                aria-controls="word-cloud-panel"
-                id="word-cloud-tab-all"
-                onClick={() => setWordCloudTab('all')}
-                className={cn(
-                  'rounded-full px-3 py-1.5 text-sm font-semibold outline-none ring-brand-400 transition focus-visible:ring-4',
-                  wordCloudTab === 'all'
-                    ? 'bg-brand-600 text-white dark:bg-brand-500'
-                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700',
-                )}
-              >
-                All words
-              </button>
-              <button
-                type="button"
-                role="tab"
                 aria-selected={wordCloudTab === 'useful'}
                 aria-controls="word-cloud-panel"
                 id="word-cloud-tab-useful"
@@ -352,6 +340,22 @@ export function Dashboard() {
               >
                 Useful words
               </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={wordCloudTab === 'all'}
+                aria-controls="word-cloud-panel"
+                id="word-cloud-tab-all"
+                onClick={() => setWordCloudTab('all')}
+                className={cn(
+                  'rounded-full px-3 py-1.5 text-sm font-semibold outline-none ring-brand-400 transition focus-visible:ring-4',
+                  wordCloudTab === 'all'
+                    ? 'bg-brand-600 text-white dark:bg-brand-500'
+                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700',
+                )}
+              >
+                All words
+              </button>
             </div>
             {loadingCharts ? (
               <Skeleton className="h-24 rounded-xl" />
@@ -363,9 +367,16 @@ export function Dashboard() {
                 className="flex flex-wrap gap-2"
               >
                 {(wordCloudTab === 'all' ? wordCloudAll : wordCloudUseful).map((term) => (
-                  <span key={term.text} className="rounded-full bg-brand-50 px-3 py-1 text-sm font-medium text-brand-600 dark:bg-brand-600/20 dark:text-brand-50" style={{ fontSize: `${Math.min(24, 12 + term.value * 2)}px` }}>
+                  <button
+                    key={term.text}
+                    type="button"
+                    onClick={() => openWordSearch(term.text)}
+                    className="rounded-full bg-brand-50 px-3 py-1 text-sm font-medium text-brand-600 transition hover:bg-brand-100 hover:text-brand-700 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-brand-400/40 dark:bg-brand-600/20 dark:text-brand-50 dark:hover:bg-brand-600/30"
+                    style={{ fontSize: `${Math.min(24, 12 + term.value * 2)}px` }}
+                    aria-label={`Search for ${term.text}`}
+                  >
                     {term.text}
-                  </span>
+                  </button>
                 ))}
               </div>
             )}

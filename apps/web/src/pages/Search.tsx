@@ -1,5 +1,6 @@
 import { Music, Search as SearchIcon } from 'lucide-react';
 import { useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { absoluteApiUrl, api, type SearchResult } from '../api/client';
 import { TextWithLinks } from '../components/MessageContent';
 import { Card, Skeleton } from '../components/ui/Card';
@@ -61,10 +62,16 @@ function SearchHitBody({ result }: { result: SearchResult }) {
 }
 
 export function Search() {
+  const [searchParams, setSearchParams] = useSearchParams();
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<SearchResult[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const nextQuery = searchParams.get('q') ?? '';
+    setQuery((currentQuery) => (currentQuery === nextQuery ? currentQuery : nextQuery));
+  }, [searchParams]);
 
   useEffect(() => {
     const trimmed = query.trim();
@@ -108,7 +115,11 @@ export function Search() {
         <input
           autoFocus
           value={query}
-          onChange={(event) => setQuery(event.target.value)}
+          onChange={(event) => {
+            const nextQuery = event.target.value;
+            setQuery(nextQuery);
+            setSearchParams(nextQuery.trim() ? { q: nextQuery } : {});
+          }}
           placeholder="Search messages..."
           className="w-full rounded-2xl border border-slate-200 bg-white py-4 pl-12 pr-4 text-lg shadow-sm outline-none transition focus:border-brand-500 focus:ring-4 focus:ring-brand-500/10 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-50"
         />
