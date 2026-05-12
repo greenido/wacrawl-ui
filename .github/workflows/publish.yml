@@ -28,27 +28,3 @@ jobs:
 
       - name: Build
         run: npm run build
-
-      - name: Prepare npm token
-        shell: bash
-        env:
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: |
-          set -euo pipefail
-          if [[ -z "${NPM_TOKEN:-}" ]]; then
-            echo "NPM_TOKEN secret is missing or empty"
-            exit 1
-          fi
-
-          # Guard against accidental CR/LF in secrets that can break HTTP headers.
-          CLEAN_NPM_TOKEN="$(printf '%s' "$NPM_TOKEN" | tr -d '\r\n')"
-          if [[ -z "$CLEAN_NPM_TOKEN" ]]; then
-            echo "NPM_TOKEN secret is invalid after sanitization"
-            exit 1
-          fi
-
-          echo "::add-mask::$CLEAN_NPM_TOKEN"
-          echo "NODE_AUTH_TOKEN=$CLEAN_NPM_TOKEN" >> "$GITHUB_ENV"
-
-      - name: Publish
-        run: npm publish --provenance --access public

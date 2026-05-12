@@ -84,9 +84,21 @@ Other root scripts:
 - **`npm run test`** — API unit tests (Vitest).
 - **`npm run typecheck`** — TypeScript checks for both workspaces.
 
-## Publishing
+## Usage (npx one-liner)
 
-Create a GitHub Release after setting the repository secret `NPM_TOKEN`. The workflow in `.github/workflows/publish.yml` builds the app and publishes the package to npm, after which the `npx wacrawl-dashboard@latest` command above works publicly.
+The simplest way to run the dashboard is a single command:
+
+```bash
+npx wacrawl-dashboard@latest
+```
+
+This installs and launches the latest published version directly from npm, no cloning or setup required. Point it at a different WaCrawl archive with the `WACRAWL_DB` environment variable:
+
+```bash
+WACRAWL_DB=/path/to/wacrawl.db npx wacrawl-dashboard@latest
+```
+
+The dashboard opens on `http://127.0.0.1:3001` and requires Node 20+.
 
 ## Configuration
 
