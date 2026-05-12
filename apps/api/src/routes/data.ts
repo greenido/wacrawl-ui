@@ -470,9 +470,21 @@ dataRouter.get('/media/file', (req, res, next) => {
 
   res.sendFile(absolutePath, (err) => {
     if (!err) return;
-    const code = (err as NodeJS.ErrnoException).code;
-    if (code === 'ENOENT') {
+    const errCode = (err as NodeJS.ErrnoException).code;
+    if (errCode === 'ENOENT') {
       res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Media file was not found on disk.' } });
+      return;
+    }
+    if (errCode === 'EACCES' || errCode === 'EPERM') {
+      res.status(403).json({
+        error: {
+          code: 'PERMISSION_DENIED',
+          message:
+            'Cannot read media file — permission denied. ' +
+            'On macOS, the process running the API server (Terminal, iTerm, etc.) needs ' +
+            'Full Disk Access: System Settings → Privacy & Security → Full Disk Access.',
+        },
+      });
       return;
     }
     next(err);

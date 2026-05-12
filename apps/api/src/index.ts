@@ -2,6 +2,7 @@ import cors from 'cors';
 import 'dotenv/config';
 import express, { type ErrorRequestHandler } from 'express';
 import { ensurePrimaryDatabase } from './db.js';
+import { isMediaRootAccessible } from './lib/mediaFsPath.js';
 import { dataRouter } from './routes/data.js';
 import { settingsRouter } from './routes/settings.js';
 import { statsRouter } from './routes/stats.js';
@@ -63,10 +64,14 @@ export function createApp(): express.Express {
       primaryDbReadable = false;
     }
 
+    const mediaStatus = isMediaRootAccessible();
+
     res.json({
       ok: primaryDbReadable,
       dbPath: paths.primaryDb,
       paths,
+      mediaAccessible: mediaStatus.accessible,
+      mediaError: mediaStatus.error ?? null,
     });
   });
 

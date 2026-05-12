@@ -7,6 +7,7 @@ import {
   resolveMediaPreviewKind,
   type MediaPreviewKind,
 } from '../lib/messageMedia';
+import { MediaPlaceholder, useMediaError } from './ui/MediaPlaceholder';
 
 const URL_SPLIT_RE = /(https?:\/\/[^\s]+)/gi;
 
@@ -60,15 +61,20 @@ function InlineMedia({
   fileUrl: string;
   alt: string;
 }) {
+  const { failed, onError } = useMediaError();
+
+  if (failed) {
+    return <MediaPlaceholder className="h-32 w-full rounded-xl" />;
+  }
   if (kind === 'image') {
     return (
       <a href={fileUrl} target="_blank" rel="noopener noreferrer" className="block overflow-hidden rounded-xl ring-1 ring-slate-200/80 dark:ring-slate-700">
-        <img src={fileUrl} alt={alt} className="max-h-56 w-full object-cover sm:max-h-72" loading="lazy" />
+        <img src={fileUrl} alt={alt} className="max-h-56 w-full object-cover sm:max-h-72" loading="lazy" onError={onError} />
       </a>
     );
   }
   if (kind === 'video') {
-    return <video src={fileUrl} className="max-h-56 w-full rounded-xl bg-black object-contain sm:max-h-72" controls preload="metadata" playsInline />;
+    return <video src={fileUrl} className="max-h-56 w-full rounded-xl bg-black object-contain sm:max-h-72" controls preload="metadata" playsInline onError={onError} />;
   }
   if (kind === 'audio') {
     return (

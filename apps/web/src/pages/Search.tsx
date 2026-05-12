@@ -4,6 +4,7 @@ import { absoluteApiUrl, api, type SearchResult } from '../api/client';
 import { TextWithLinks } from '../components/MessageContent';
 import { Card, Skeleton } from '../components/ui/Card';
 import { CopyButton } from '../components/ui/CopyButton';
+import { MediaPlaceholder, useMediaError } from '../components/ui/MediaPlaceholder';
 import { humanizeMixedSnippet, resolveMediaPreviewKind, searchHitClipboardText } from '../lib/messageMedia';
 import { displayNameOrUnknown, formatDateTime } from '../lib/utils';
 
@@ -12,6 +13,7 @@ function SearchHitBody({ result }: { result: SearchResult }) {
   const path = result.mediaPath?.trim();
   const fileUrl = path ? absoluteApiUrl(`/api/media/file?path=${encodeURIComponent(path)}`) : null;
   const showThumb = Boolean(fileUrl && (kind === 'image' || kind === 'video'));
+  const { failed, onError } = useMediaError();
 
   const snippetRaw = result.snippet?.trim() ?? '';
   const snippetDisplay = snippetRaw ? humanizeMixedSnippet(result.snippet!, result.mediaType) : null;
@@ -20,10 +22,12 @@ function SearchHitBody({ result }: { result: SearchResult }) {
     <div className="mt-3 flex gap-3">
       {showThumb && fileUrl ? (
         <div className="h-16 w-16 shrink-0 overflow-hidden rounded-xl bg-slate-100 ring-1 ring-slate-200 dark:bg-slate-800 dark:ring-slate-700">
-          {kind === 'image' ? (
-            <img src={fileUrl} alt="" className="h-full w-full object-cover" loading="lazy" />
+          {failed ? (
+            <MediaPlaceholder className="h-full w-full" />
+          ) : kind === 'image' ? (
+            <img src={fileUrl} alt="" className="h-full w-full object-cover" loading="lazy" onError={onError} />
           ) : (
-            <video src={fileUrl} className="h-full w-full object-cover" muted playsInline preload="metadata" />
+            <video src={fileUrl} className="h-full w-full object-cover" muted playsInline preload="metadata" onError={onError} />
           )}
         </div>
       ) : null}

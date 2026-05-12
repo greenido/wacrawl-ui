@@ -2,6 +2,7 @@ import { Music, Play, X } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { absoluteApiUrl, api, type MediaItem } from '../api/client';
 import { Card, Skeleton } from '../components/ui/Card';
+import { MediaPlaceholder, useMediaError } from '../components/ui/MediaPlaceholder';
 import { formatBytes, formatDateTime } from '../lib/utils';
 import { friendlyMediaLabel, isLikelyOpaqueMediaHandle, resolveMediaPreviewKind, type MediaPreviewKind as PreviewKind } from '../lib/messageMedia';
 
@@ -80,46 +81,9 @@ export function Media() {
         <Card className="p-10 text-center text-slate-500 dark:border-slate-800 dark:bg-slate-900">No media files found.</Card>
       ) : (
         <div className="grid grid-cols-5 gap-4">
-          {items.map((item) => {
-            const fileUrl = absoluteApiUrl(item.fileUrl);
-            const previewKind = getPreviewKind(item);
-
-            return (
-              <button
-                key={item.id}
-                type="button"
-                onClick={() => setActiveItem(item)}
-                className="overflow-hidden rounded-2xl border border-slate-200 bg-white text-left shadow-sm transition [content-visibility:auto] hover:-translate-y-0.5 hover:shadow-md dark:border-slate-800 dark:bg-slate-900"
-                aria-label={`Open ${previewKind === 'other' ? item.mediaType : previewKind} from ${item.chatName}`}
-              >
-                <div className="relative flex h-40 items-center justify-center bg-slate-100 dark:bg-slate-800">
-                  {previewKind === 'image' ? (
-                    <img src={fileUrl} alt={mediaAltLabel(item.text, item.chatName, item.mediaType)} className="h-full w-full object-cover" loading="lazy" />
-                  ) : previewKind === 'video' ? (
-                    <>
-                      <video src={fileUrl} className="h-full w-full object-cover" preload="metadata" muted playsInline />
-                      <span className="absolute rounded-full bg-slate-950/75 p-3 text-white">
-                        <Play className="h-5 w-5 fill-current" />
-                      </span>
-                    </>
-                  ) : previewKind === 'audio' ? (
-                    <div className="flex flex-col items-center gap-3 text-slate-700 dark:text-slate-200">
-                      <span className="rounded-full bg-slate-900 p-4 text-white dark:bg-slate-700">
-                        <Music className="h-6 w-6" />
-                      </span>
-                      <span className="text-xs font-semibold uppercase tracking-wide">Play audio</span>
-                    </div>
-                  ) : (
-                    <span className="rounded-full bg-slate-900 px-3 py-1 text-xs font-semibold uppercase text-white">{item.mediaType}</span>
-                  )}
-                </div>
-                <div className="space-y-1 p-3 text-sm">
-                  <p className="truncate font-medium text-slate-950 dark:text-slate-50">{item.chatName}</p>
-                  <p className="text-xs text-slate-500">{formatBytes(item.mediaSize)} · {formatDateTime(item.sentAt)}</p>
-                </div>
-              </button>
-            );
-          })}
+          {items.map((item) => (
+            <MediaGridCard key={item.id} item={item} onSelect={setActiveItem} />
+          ))}
         </div>
       )}
 
@@ -145,16 +109,69 @@ export function Media() {
   );
 }
 
+function MediaGridCard({ item, onSelect }: { item: MediaItem; onSelect: (item: MediaItem) => void }) {
+  const fileUrl = absoluteApiUrl(item.fileUrl);
+  const previewKind = getPreviewKind(item);
+  const { failed, onError } = useMediaError();
+
+  return (
+    <button
+      type="button"
+      onClick={() => onSelect(item)}
+      className="overflow-hidden rounded-2xl border border-slate-200 bg-white text-left shadow-sm transition [content-visibility:auto] hover:-translate-y-0.5 hover:shadow-md dark:border-slate-800 dark:bg-slate-900"
+      aria-label={`Open ${previewKind === 'other' ? item.mediaType : previewKind} from ${item.chatName}`}
+    >
+      <div className="relative flex h-40 items-center justify-center bg-slate-100 dark:bg-slate-800">
+        {failed ? (
+          <MediaPlaceholder className="h-full w-full" />
+        ) : previewKind === 'image' ? (
+          <img src={fileUrl} alt={mediaAltLabel(item.text, item.chatName, item.mediaType)} className="h-full w-full object-cover" loading="lazy" onError={onError} />
+        ) : previewKind === 'video' ? (
+          <>
+            <video src={fileUrl} className="h-full w-full object-cover" preload="metadata" muted playsInline onError={onError} />
+            <span className="absolute rounded-full bg-slate-950/75 p-3 text-white">
+              <Play className="h-5 w-5 fill-current" />
+            </span>
+          </>
+        ) : previewKind === 'audio' ? (
+          <div className="flex flex-col items-center gap-3 text-slate-700 dark:text-slate-200">
+            <span className="rounded-full bg-slate-900 p-4 text-white dark:bg-slate-700">
+              <Music className="h-6 w-6" />
+            </span>
+            <span className="text-xs font-semibold uppercase tracking-wide">Play audio</span>
+          </div>
+        ) : (
+          <span className="rounded-full bg-slate-900 px-3 py-1 text-xs font-semibold uppercase text-white">{item.mediaType}</span>
+        )}
+      </div>
+      <div className="space-y-1 p-3 text-sm">
+        <p className="truncate font-medium text-slate-950 dark:text-slate-50">{item.chatName}</p>
+        <p className="text-xs text-slate-500">{formatBytes(item.mediaSize)} · {formatDateTime(item.sentAt)}</p>
+      </div>
+    </button>
+  );
+}
+
 function MediaPreview({ item }: { item: MediaItem }) {
   const fileUrl = absoluteApiUrl(item.fileUrl);
   const previewKind = getPreviewKind(item);
+  const { failed, onError } = useMediaError();
+
+  if (failed) {
+    return (
+      <MediaPlaceholder
+        className="flex h-80 w-[640px] max-w-[calc(100vw-4rem)]"
+        message="File not accessible — check that the media directory is readable and that Full Disk Access has been granted."
+      />
+    );
+  }
 
   if (previewKind === 'image') {
-    return <img src={fileUrl} alt={mediaAltLabel(item.text, item.chatName, item.mediaType)} className="max-h-[75vh] w-full object-contain" />;
+    return <img src={fileUrl} alt={mediaAltLabel(item.text, item.chatName, item.mediaType)} className="max-h-[75vh] w-full object-contain" onError={onError} />;
   }
 
   if (previewKind === 'video') {
-    return <video src={fileUrl} className="max-h-[75vh] w-full bg-black" controls autoPlay playsInline />;
+    return <video src={fileUrl} className="max-h-[75vh] w-full bg-black" controls autoPlay playsInline onError={onError} />;
   }
 
   if (previewKind === 'audio') {
