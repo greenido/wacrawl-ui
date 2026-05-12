@@ -1,4 +1,4 @@
-import { BarChart3, HelpCircle, Image, LayoutDashboard, MessageCircle, Search, Users } from 'lucide-react';
+import { BarChart3, HelpCircle, Image, LayoutDashboard, MessageCircle, Search, Settings as SettingsIcon, Users } from 'lucide-react';
 import { NavLink } from 'react-router-dom';
 import { cn } from '../../lib/utils';
 
@@ -8,6 +8,7 @@ const links = [
   { to: '/chats', label: 'Chats', icon: MessageCircle },
   { to: '/media', label: 'Media', icon: Image },
   { to: '/search', label: 'Search', icon: Search },
+  { to: '/settings', label: 'Settings', icon: SettingsIcon },
 ];
 
 interface SidebarProps {

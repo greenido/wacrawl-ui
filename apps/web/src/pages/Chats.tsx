@@ -3,7 +3,8 @@ import { useSearchParams } from 'react-router-dom';
 import { api, type ChatSummary, type MessageSummary } from '../api/client';
 import { MessageContent } from '../components/MessageContent';
 import { Card, Skeleton } from '../components/ui/Card';
-import { chatPreviewLine } from '../lib/messageMedia';
+import { CopyButton } from '../components/ui/CopyButton';
+import { chatPreviewLine, messageClipboardText } from '../lib/messageMedia';
 import { cn } from '../lib/utils';
 import { displayNameOrUnknown, formatDateTime, formatNumber, isLidIdentifier } from '../lib/utils';
 
@@ -117,9 +118,12 @@ export function Chats() {
                 <div className="space-y-3">
                   {messages.map((message) => (
                     <article key={message.id} className={cn('rounded-2xl p-4', message.fromMe ? 'ml-auto max-w-[75%] bg-brand-50 dark:bg-brand-600/20' : 'mr-auto max-w-[75%] bg-slate-50 dark:bg-slate-800')}>
-                      <div className="mb-1 flex items-center justify-between gap-3 text-xs text-slate-500">
-                        <span>{message.fromMe ? 'Me' : displayNameOrUnknown(message.senderName, message.senderJid)}</span>
-                        <span>{formatDateTime(message.sentAt)}</span>
+                      <div className="mb-1 flex items-center justify-between gap-2 text-xs text-slate-500 dark:text-slate-400">
+                        <span className="min-w-0 truncate">{message.fromMe ? 'Me' : displayNameOrUnknown(message.senderName, message.senderJid)}</span>
+                        <span className="flex shrink-0 items-center gap-1">
+                          <span>{formatDateTime(message.sentAt)}</span>
+                          <CopyButton text={messageClipboardText(message.text, message.mediaType)} />
+                        </span>
                       </div>
                       <MessageContent
                         text={message.text}

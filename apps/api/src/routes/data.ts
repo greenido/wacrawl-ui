@@ -2,6 +2,7 @@ import { Router } from 'express';
 import type { Database } from 'better-sqlite3';
 import { getDb } from '../db.js';
 import { cleanDisplayNameSql, contactDisplayNameSql, contactMatchSql } from '../lib/displayName.js';
+import { resolveArchiveMediaPath } from '../lib/mediaFsPath.js';
 import { parseLimit, parseOffset, unixSecondsToIso } from '../lib/query.js';
 import { hasMessageSearchIndex, MESSAGE_SEARCH_FTS_TABLE } from '../lib/searchIndex.js';
 import type { ChatSummary, ListResponse, MediaItem, MessageSummary, PersonSummary, SearchResult } from '../types.js';
@@ -440,8 +441,8 @@ dataRouter.get('/media', (req, res) => {
   res.json(getMediaItems(req.query));
 });
 
-dataRouter.get('/media/file', (req, res) => {
-  const mediaPath = typeof req.query.path === 'string' ? req.query.path : '';
+dataRouter.get('/media/file', (req, res, next) => {
+  const mediaPath = typeof req.query.path === 'string' ? req.query.path.trim() : '';
   if (!mediaPath) {
     res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'path is required.' } });
     return;
@@ -459,7 +460,23 @@ dataRouter.get('/media/file', (req, res) => {
     return;
   }
 
-  res.sendFile(row.mediaPath);
+  let absolutePath: string;
+  try {
+    absolutePath = resolveArchiveMediaPath(row.mediaPath);
+  } catch {
+    res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid media path.' } });
+    return;
+  }
+
+  res.sendFile(absolutePath, (err) => {
+    if (!err) return;
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT') {
+      res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Media file was not found on disk.' } });
+      return;
+    }
+    next(err);
+  });
 });
 
 dataRouter.get('/search', (req, res) => {

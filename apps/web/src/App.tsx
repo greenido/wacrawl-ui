@@ -8,6 +8,7 @@ import { Dashboard } from './pages/Dashboard';
 import { Media } from './pages/Media';
 import { People } from './pages/People';
 import { Search } from './pages/Search';
+import { Settings } from './pages/Settings';
 import { useAppStore } from './store/appStore';
 
 const WELCOME_SEEN_KEY = 'wacrawl:welcome-seen';
@@ -17,6 +18,7 @@ const shortcutRoutes: Record<string, string> = {
   '3': '/chats',
   '4': '/media',
   '5': '/search',
+  '6': '/settings',
 };
 
 export function App() {
@@ -76,6 +78,7 @@ export function App() {
           <Route path="/chats" element={<Chats />} />
           <Route path="/media" element={<Media />} />
           <Route path="/search" element={<Search />} />
+          <Route path="/settings" element={<Settings />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </div>

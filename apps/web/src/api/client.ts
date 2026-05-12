@@ -158,6 +158,27 @@ export class ApiClientError extends Error {
   }
 }
 
+export interface ResolvedArchivePaths {
+  whatsappContainer: string | null;
+  chatDb: string | null;
+  contactsDb: string | null;
+  mediaRoot: string;
+  primaryDb: string;
+}
+
+export interface HealthResponse {
+  ok: boolean;
+  dbPath: string;
+  paths: ResolvedArchivePaths;
+}
+
+export interface PathsSettingsResponse {
+  envDefaults: ResolvedArchivePaths;
+  storedOverride: Partial<Record<keyof ResolvedArchivePaths, string | null>> | null;
+  effective: ResolvedArchivePaths;
+  pathsFile: boolean;
+}
+
 async function request<T>(path: string, params?: Record<string, string | number | undefined>): Promise<T> {
   const url = new URL(path, API_URL);
   for (const [key, value] of Object.entries(params ?? {})) {
@@ -181,12 +202,42 @@ async function request<T>(path: string, params?: Record<string, string | number 
   return response.json() as Promise<T>;
 }
 
+async function jsonRequest<T>(path: string, init?: RequestInit): Promise<T> {
+  const url = new URL(path, API_URL);
+  const response = await fetch(url, {
+    ...init,
+    headers: {
+      'Content-Type': 'application/json',
+      ...(init?.headers ?? {}),
+    },
+  });
+  if (!response.ok) {
+    let message = `Request failed with status ${response.status}`;
+    try {
+      const body = await response.json() as { error?: { message?: string } };
+      message = body.error?.message ?? message;
+    } catch {
+      // Keep the generic HTTP message if the response is not JSON.
+    }
+    throw new ApiClientError(message, response.status);
+  }
+  return response.json() as Promise<T>;
+}
+
 export function absoluteApiUrl(path: string): string {
   return new URL(path, API_URL).toString();
 }
 
 export const api = {
-  health: () => request<{ ok: boolean; dbPath: string }>('/api/health'),
+  health: () => request<HealthResponse>('/api/health'),
+  pathsSettings: () => request<PathsSettingsResponse>('/api/settings/paths'),
+  pathsSettingsSave: (body: Partial<Record<keyof ResolvedArchivePaths, string>>) =>
+    jsonRequest<{ ok: boolean; effective: ResolvedArchivePaths }>('/api/settings/paths', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  pathsSettingsReset: () =>
+    jsonRequest<{ ok: boolean; effective: ResolvedArchivePaths }>('/api/settings/paths', { method: 'DELETE' }),
   overview: () => request<OverviewStats>('/api/stats/overview'),
   topContacts: (period: Period, limit = 10) => request<TopContact[]>('/api/stats/top-contacts', { period, limit }),
   messageVolume: (period: Period, granularity: 'day' | 'week' | 'month' = period === 'year' || period === 'all' ? 'month' : 'day') =>
@@ -202,7 +253,8 @@ export const api = {
   responseTimes: (period: Period, limit = 10) => request<ResponseTimeStat[]>('/api/stats/response-times', { period, limit }),
   groupActivity: (period: Period, limit = 10) => request<GroupActivityStat[]>('/api/stats/group-activity', { period, limit }),
   streaks: (period: Period) => request<MessageStreaks>('/api/stats/streaks', { period }),
-  wordCloud: (period: Period, limit = 40) => request<WordCloudTerm[]>('/api/stats/word-cloud', { period, limit }),
+  wordCloud: (period: Period, limit = 40, filter: 'all' | 'useful' = 'all') =>
+    request<WordCloudTerm[]>('/api/stats/word-cloud', { period, limit, filter }),
   people: (limit = 50, offset = 0) => request<ListResponse<PersonSummary>>('/api/people', { limit, offset }),
   chats: (limit = 50, offset = 0, kind?: 'direct' | 'group') => request<ListResponse<ChatSummary>>('/api/chats', { limit, offset, kind }),
   chatMessages: (jid: string, limit = 50, offset = 0) =>

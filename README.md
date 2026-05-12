@@ -18,7 +18,18 @@ The API runs on `http://127.0.0.1:3001` and the Vite app runs on `http://localho
 
 ## Configuration
 
-The API opens the database in readonly mode. Override the default database path with:
+Copy `apps/api/.env.example` to `apps/api/.env` (and optionally `apps/web/.env.example` to `apps/web/.env.local`) and edit paths for your WhatsApp container and WaCrawl database.
+
+Supported variables:
+
+- **`WACRAWL_WHATSAPP_CONTAINER`** — folder such as `Library/Group Containers/group.net.whatsapp.WhatsApp.shared`; used to derive default chat, contacts, and media paths when those variables are omitted.
+- **`WACRAWL_CHAT_DB`** / **`WACRAWL_CONTACTS_DB`** — explicit paths to `ChatStorage.sqlite` and `ContactsV2.sqlite`.
+- **`WACRAWL_MEDIA_ROOT`** — folder containing downloaded media (often `…/Message/Media`); relative paths in the archive resolve against this directory.
+- **`WACRAWL_DB`** — primary SQLite file the dashboard queries (WaCrawl export schema from `wacrawl sync`). Defaults to `~/.wacrawl/wacrawl.db`.
+
+You can also open **Settings** in the sidebar (⌘6): overrides are saved to `~/.wacrawl/dashboard-paths.json` so the API picks them up without relying on browser-only headers (needed for `<img>` / `<video>` URLs).
+
+To run the API once with env overrides:
 
 ```bash
 WACRAWL_DB=/path/to/wacrawl.db npm run dev -w @wacrawl/api

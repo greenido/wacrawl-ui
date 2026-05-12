@@ -14,6 +14,7 @@ import {
   yearBounds,
 } from '../lib/query.js';
 import { hourInTimezone, resolveStatsTimeZone } from '../lib/timezone.js';
+import { USEFUL_WORD_STOP_SET } from '../lib/wordCloudUsefulStopWords.js';
 import type {
   ActivityHeatmapPoint,
   DayOfWeekStat,
@@ -138,10 +139,13 @@ export function getTopContacts(params: { period?: unknown; limit?: unknown }, db
   const rows = db.prepare(`
     WITH normalized_messages AS (
       SELECT
-        CASE
-          WHEN from_me = 1 THEN chat_jid
-          ELSE COALESCE(sender_jid, chat_jid)
-        END AS jid,
+        COALESCE(
+          contacts.jid,
+          CASE
+            WHEN from_me = 1 THEN chat_jid
+            ELSE COALESCE(sender_jid, chat_jid)
+          END
+        ) AS jid,
         ${contactDisplayNameSql('contacts')} AS contact_name,
         contacts.phone AS contact_phone,
         ${cleanDisplayNameSql(`
@@ -449,22 +453,28 @@ export function getMessageStreaks(params: { period?: unknown }, db: Database = g
   return { currentStreak, longestStreak };
 }
 
-export function getWordCloud(params: { period?: unknown; limit?: unknown }, db: Database = getDb()): WordCloudTerm[] {
+function parseWordCloudFilter(value: unknown): 'all' | 'useful' {
+  return value === 'useful' ? 'useful' : 'all';
+}
+
+export function getWordCloud(params: { period?: unknown; limit?: unknown; filter?: unknown }, db: Database = getDb()): WordCloudTerm[] {
   const since = sinceTimestamp(parsePeriod(params.period));
   const limit = parseLimit(params.limit, 50, 200);
+  const filterMode = parseWordCloudFilter(params.filter);
   const rows = db.prepare(`
     SELECT text
     FROM messages
     WHERE ts >= @since AND text IS NOT NULL AND TRIM(text) <> ''
   `).all({ since }) as TextRow[];
-  const stopWords = new Set(['about', 'after', 'also', 'and', 'are', 'but', 'for', 'from', 'good', 'have', 'hello', 'hey', 'not', 'the', 'this', 'that', 'with', 'you', 'your']);
   const counts = new Map<string, number>();
 
   for (const row of rows) {
     for (const term of (row.text ?? '').toLowerCase().match(/[a-z0-9]{3,}/g) ?? []) {
-      if (!stopWords.has(term)) {
-        counts.set(term, (counts.get(term) ?? 0) + 1);
+      if (filterMode === 'useful') {
+        if (/^\d+$/.test(term)) continue;
+        if (USEFUL_WORD_STOP_SET.has(term)) continue;
       }
+      counts.set(term, (counts.get(term) ?? 0) + 1);
     }
   }
 

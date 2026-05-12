@@ -97,8 +97,31 @@ describe('stats queries', () => {
     insertMessage.run(8, 'family@g.us', 'Family', 'm8', '272528660545772@lid', 'IAA=', 1_700_604_800, 0, 'lid group', 0, 'image', 'image', '/tmp/lid.jpg', 25);
 
     expect(getTopContacts({ period: 'all', limit: '10' }, db).find((contact) => contact.jid === '89760605454342@lid')?.name).toBe('Niv');
-    expect(getTopContacts({ period: 'all', limit: '10' }, db).find((contact) => contact.jid === '272528660545772@lid')?.name).toBe('Eynan Tzabar');
+    expect(getTopContacts({ period: 'all', limit: '10' }, db).find((contact) => contact.jid === '972533351664@s.whatsapp.net')?.name).toBe('Eynan Tzabar');
     expect(getMediaSenders({ period: 'all', limit: '10' }, db).find((sender) => sender.jid === '272528660545772@lid')?.name).toBe('Eynan Tzabar');
+  });
+
+  it('merges top contacts that share the same contacts row (jid vs lid)', () => {
+    db = createTestDb();
+    db.prepare('INSERT INTO contacts (jid, full_name, first_name, lid) VALUES (?, ?, ?, ?)').run(
+      'merge-test@s.whatsapp.net',
+      'Merge Person',
+      'Merge',
+      '111222333444@lid',
+    );
+    const insertMessage = db.prepare(`
+      INSERT INTO messages (
+        source_pk, chat_jid, chat_name, msg_id, sender_jid, sender_name, ts,
+        from_me, text, raw_type, message_type, media_type, media_path, media_size
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    insertMessage.run(70, 'family@g.us', 'Family', 'm70', '111222333444@lid', 'IAA=', 1_700_518_400, 0, 'from lid', 0, 'text', null, null, null);
+    insertMessage.run(71, 'merge-test@s.whatsapp.net', 'Merge', 'm71', null, null, 1_700_604_800, 1, 'to phone jid', 0, 'text', null, null, null);
+
+    const merged = getTopContacts({ period: 'all', limit: '20' }, db).find((c) => c.jid === 'merge-test@s.whatsapp.net');
+    expect(merged).toMatchObject({ messageCount: 2, sentByMe: 1, sentByThem: 1 });
+    expect(getTopContacts({ period: 'all', limit: '20' }, db).some((c) => c.jid === '111222333444@lid')).toBe(false);
   });
 
   it('buckets message volume by day', () => {
@@ -154,6 +177,12 @@ describe('stats queries', () => {
       participantCount: 2,
     });
     expect(getMessageStreaks({ period: 'all' }, db)).toEqual({ currentStreak: 0, longestStreak: 6 });
+    const allWords = getWordCloud({ period: 'all', limit: '200', filter: 'all' }, db).map((t) => t.text);
+    const usefulWords = getWordCloud({ period: 'all', limit: '200', filter: 'useful' }, db).map((t) => t.text);
+    expect(allWords.some((text) => text === 'hey')).toBe(true);
+    expect(allWords.some((text) => text === 'the')).toBe(true);
+    expect(usefulWords.some((text) => text === 'hey')).toBe(false);
+    expect(usefulWords.some((text) => text === 'the')).toBe(false);
     expect(getWordCloud({ period: 'all', limit: '3' }, db)[0]).toMatchObject({ text: 'family', value: 2 });
   });
 });

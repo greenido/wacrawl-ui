@@ -1,9 +1,11 @@
 import cors from 'cors';
 import 'dotenv/config';
 import express, { type ErrorRequestHandler } from 'express';
-import { getDbPath } from './db.js';
+import { ensurePrimaryDatabase } from './db.js';
 import { dataRouter } from './routes/data.js';
+import { settingsRouter } from './routes/settings.js';
 import { statsRouter } from './routes/stats.js';
+import { getResolvedPaths, pathsMiddleware } from './runtimePaths.js';
 
 const PORT = Number(process.env.PORT ?? 3001);
 const HOST = '127.0.0.1';
@@ -22,6 +24,8 @@ export function createApp(): express.Express {
   const app = express();
 
   app.disable('x-powered-by');
+
+  app.use(express.json({ limit: '64kb' }));
 
   app.use((req, res, next) => {
     const host = req.headers.host;
@@ -47,13 +51,26 @@ export function createApp(): express.Express {
     },
   }));
 
+  app.use(pathsMiddleware);
+
   app.get('/api/health', (_req, res) => {
+    const paths = getResolvedPaths();
+    let primaryDbReadable = false;
+    try {
+      ensurePrimaryDatabase();
+      primaryDbReadable = true;
+    } catch {
+      primaryDbReadable = false;
+    }
+
     res.json({
-      ok: true,
-      dbPath: getDbPath(),
+      ok: primaryDbReadable,
+      dbPath: paths.primaryDb,
+      paths,
     });
   });
 
+  app.use('/api/settings', settingsRouter);
   app.use('/api/stats', statsRouter);
   app.use('/api', dataRouter);
 
@@ -69,7 +86,7 @@ export function createApp(): express.Express {
   const errorHandler: ErrorRequestHandler = (error, _req, res, _next) => {
     const code = error?.code === 'SQLITE_CANTOPEN' ? 'DATABASE_UNAVAILABLE' : 'INTERNAL_ERROR';
     const message = code === 'DATABASE_UNAVAILABLE'
-      ? 'Cannot open the WaCrawl database. Check WACRAWL_DB or run wacrawl sync.'
+      ? 'Cannot open the WaCrawl database. Check Settings → Archive paths, WACRAWL_DB in .env, or run wacrawl sync.'
       : 'Unexpected server error.';
 
     res.status(code === 'DATABASE_UNAVAILABLE' ? 503 : 500).json({

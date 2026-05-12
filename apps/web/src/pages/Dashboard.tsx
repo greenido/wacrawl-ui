@@ -23,7 +23,7 @@ import {
   type TopContact,
   type WordCloudTerm,
 } from '../api/client';
-import { formatBytes, formatNumber } from '../lib/utils';
+import { formatBytes, formatNumber, cn } from '../lib/utils';
 import { useAppStore } from '../store/appStore';
 
 function formatDateRange(stats: OverviewStats | null): string {
@@ -137,7 +137,9 @@ export function Dashboard() {
   const [responseTimes, setResponseTimes] = useState<ResponseTimeStat[]>([]);
   const [groupActivity, setGroupActivity] = useState<GroupActivityStat[]>([]);
   const [streaks, setStreaks] = useState<MessageStreaks | null>(null);
-  const [wordCloud, setWordCloud] = useState<WordCloudTerm[]>([]);
+  const [wordCloudAll, setWordCloudAll] = useState<WordCloudTerm[]>([]);
+  const [wordCloudUseful, setWordCloudUseful] = useState<WordCloudTerm[]>([]);
+  const [wordCloudTab, setWordCloudTab] = useState<'all' | 'useful'>('all');
   const [loadingOverview, setLoadingOverview] = useState(true);
   const [loadingCharts, setLoadingCharts] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -179,9 +181,10 @@ export function Dashboard() {
       api.responseTimes(period, 6),
       api.groupActivity(period, 6),
       api.streaks(period),
-      api.wordCloud(period, 30),
+      api.wordCloud(period, 30, 'all'),
+      api.wordCloud(period, 30, 'useful'),
     ])
-      .then(([contacts, volume, activity, hours, weekdays, mediaTypes, senders, ratio, responses, groups, streakData, words]) => {
+      .then(([contacts, volume, activity, hours, weekdays, mediaTypes, senders, ratio, responses, groups, streakData, wordsAll, wordsUseful]) => {
         if (!active) return;
         setTopContacts(contacts);
         setMessageVolume(volume);
@@ -194,7 +197,8 @@ export function Dashboard() {
         setResponseTimes(responses);
         setGroupActivity(groups);
         setStreaks(streakData);
-        setWordCloud(words);
+        setWordCloudAll(wordsAll);
+        setWordCloudUseful(wordsUseful);
       })
       .catch((err: Error) => {
         if (active) setError(err.message);
@@ -301,12 +305,70 @@ export function Dashboard() {
           </div>
         </ListCard>
         <ListCard title="Word Cloud" onDeepDive={() => navigate('/search')}>
-          <div className="flex flex-wrap gap-2">
-            {wordCloud.map((term) => (
-              <span key={term.text} className="rounded-full bg-brand-50 px-3 py-1 text-sm font-medium text-brand-600 dark:bg-brand-600/20 dark:text-brand-50" style={{ fontSize: `${Math.min(24, 12 + term.value * 2)}px` }}>
-                {term.text}
-              </span>
-            ))}
+          <div
+            role="presentation"
+            className="space-y-3"
+            onClick={(event) => event.stopPropagation()}
+            onKeyDown={(event) => {
+              const tablist = event.currentTarget.querySelector('[role="tablist"]');
+              const targetNode = event.target as Node | null;
+              if (tablist && targetNode && tablist.contains(targetNode)) {
+                if (event.key === 'Enter' || event.key === ' ') {
+                  event.stopPropagation();
+                }
+              }
+            }}
+          >
+            <div role="tablist" aria-label="Word cloud mode" className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={wordCloudTab === 'all'}
+                aria-controls="word-cloud-panel"
+                id="word-cloud-tab-all"
+                onClick={() => setWordCloudTab('all')}
+                className={cn(
+                  'rounded-full px-3 py-1.5 text-sm font-semibold outline-none ring-brand-400 transition focus-visible:ring-4',
+                  wordCloudTab === 'all'
+                    ? 'bg-brand-600 text-white dark:bg-brand-500'
+                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700',
+                )}
+              >
+                All words
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={wordCloudTab === 'useful'}
+                aria-controls="word-cloud-panel"
+                id="word-cloud-tab-useful"
+                onClick={() => setWordCloudTab('useful')}
+                className={cn(
+                  'rounded-full px-3 py-1.5 text-sm font-semibold outline-none ring-brand-400 transition focus-visible:ring-4',
+                  wordCloudTab === 'useful'
+                    ? 'bg-brand-600 text-white dark:bg-brand-500'
+                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700',
+                )}
+              >
+                Useful words
+              </button>
+            </div>
+            {loadingCharts ? (
+              <Skeleton className="h-24 rounded-xl" />
+            ) : (
+              <div
+                id="word-cloud-panel"
+                role="tabpanel"
+                aria-labelledby={wordCloudTab === 'all' ? 'word-cloud-tab-all' : 'word-cloud-tab-useful'}
+                className="flex flex-wrap gap-2"
+              >
+                {(wordCloudTab === 'all' ? wordCloudAll : wordCloudUseful).map((term) => (
+                  <span key={term.text} className="rounded-full bg-brand-50 px-3 py-1 text-sm font-medium text-brand-600 dark:bg-brand-600/20 dark:text-brand-50" style={{ fontSize: `${Math.min(24, 12 + term.value * 2)}px` }}>
+                    {term.text}
+                  </span>
+                ))}
+              </div>
+            )}
           </div>
         </ListCard>
       </section>

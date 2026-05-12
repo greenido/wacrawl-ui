@@ -9,6 +9,7 @@ const titles: Record<string, string> = {
   '/chats': 'Chats',
   '/media': 'Media',
   '/search': 'Search',
+  '/settings': 'Settings',
 };
 
 interface TopBarProps {

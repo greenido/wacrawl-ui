@@ -63,6 +63,15 @@ export function chatPreviewLine(text: string | null | undefined, lastMessageMedi
   return raw || friendlyMediaLabel(lastMessageMediaType) || 'No preview';
 }
 
+/** Plain caption or media label for clipboard (opaque archive tokens become a readable label). */
+export function messageClipboardText(text: string | null | undefined, mediaType: string | null | undefined): string {
+  const raw = text?.trim() ?? '';
+  if (raw.length > 0) {
+    return isLikelyOpaqueMediaHandle(raw) ? friendlyMediaLabel(mediaType) : raw;
+  }
+  return friendlyMediaLabel(mediaType) || '';
+}
+
 /** Search snippets sometimes join chat name with opaque keys — replace token-by-token. */
 export function humanizeMixedSnippet(snippet: string, mediaType: string | null | undefined): string {
   const s = snippet.trim();
@@ -78,4 +87,17 @@ export function humanizeMixedSnippet(snippet: string, mediaType: string | null |
       return isLikelyOpaqueMediaHandle(p) ? friendlyMediaLabel(mediaType) : part;
     })
     .join(sep);
+}
+
+/** Matches search UI: prefer humanized snippet, else message body. */
+export function searchHitClipboardText(
+  snippet: string | null | undefined,
+  text: string | null | undefined,
+  mediaType: string | null | undefined,
+): string {
+  const snippetRaw = snippet?.trim() ?? '';
+  if (snippetRaw.length > 0) {
+    return humanizeMixedSnippet(snippetRaw, mediaType);
+  }
+  return messageClipboardText(text, mediaType);
 }

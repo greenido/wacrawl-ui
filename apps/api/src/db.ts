@@ -1,40 +1,35 @@
 import Database from 'better-sqlite3';
-import os from 'node:os';
-import path from 'node:path';
-
-const DEFAULT_DB_PATH = path.join(os.homedir(), '.wacrawl', 'wacrawl.db');
+import { getResolvedPaths } from './runtimePaths.js';
 
 let db: Database.Database | null = null;
+let cachedPrimaryDb = '';
 
-function resolveDbPath(): string {
-  const configuredPath = process.env.WACRAWL_DB?.trim();
-  if (!configuredPath) {
-    return DEFAULT_DB_PATH;
+export function ensurePrimaryDatabase(): Database.Database {
+  const paths = getResolvedPaths();
+  const key = paths.primaryDb;
+  if (db && cachedPrimaryDb === key) {
+    return db;
   }
 
-  if (configuredPath.startsWith('~/')) {
-    return path.join(os.homedir(), configuredPath.slice(2));
-  }
-
-  return configuredPath;
+  db?.close();
+  db = new Database(paths.primaryDb, {
+    fileMustExist: true,
+    readonly: true,
+  });
+  cachedPrimaryDb = key;
+  return db;
 }
 
 export function getDb(): Database.Database {
-  if (!db) {
-    db = new Database(resolveDbPath(), {
-      fileMustExist: true,
-      readonly: true,
-    });
-  }
-
-  return db;
+  return ensurePrimaryDatabase();
 }
 
 export function closeDb(): void {
   db?.close();
   db = null;
+  cachedPrimaryDb = '';
 }
 
 export function getDbPath(): string {
-  return resolveDbPath();
+  return getResolvedPaths().primaryDb;
 }

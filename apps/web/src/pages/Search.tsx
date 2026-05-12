@@ -3,7 +3,8 @@ import { useEffect, useState } from 'react';
 import { absoluteApiUrl, api, type SearchResult } from '../api/client';
 import { TextWithLinks } from '../components/MessageContent';
 import { Card, Skeleton } from '../components/ui/Card';
-import { humanizeMixedSnippet, resolveMediaPreviewKind } from '../lib/messageMedia';
+import { CopyButton } from '../components/ui/CopyButton';
+import { humanizeMixedSnippet, resolveMediaPreviewKind, searchHitClipboardText } from '../lib/messageMedia';
 import { displayNameOrUnknown, formatDateTime } from '../lib/utils';
 
 function SearchHitBody({ result }: { result: SearchResult }) {
@@ -127,11 +128,14 @@ export function Search() {
             {results.map((result) => (
               <article key={result.id} className="py-4">
                 <div className="flex items-start justify-between gap-4">
-                  <div>
+                  <div className="min-w-0 flex-1">
                     <h3 className="font-semibold text-slate-950 dark:text-slate-50">{result.chatName}</h3>
                     <p className="text-sm text-slate-500">{result.fromMe ? 'Me' : displayNameOrUnknown(result.senderName, result.senderJid)} · {formatDateTime(result.sentAt)}</p>
                   </div>
-                  {result.mediaType ? <span className="rounded-full bg-slate-100 px-2 py-1 text-xs text-slate-600 dark:bg-slate-800 dark:text-slate-300">{result.mediaType}</span> : null}
+                  <div className="flex shrink-0 items-start gap-2">
+                    <CopyButton text={searchHitClipboardText(result.snippet, result.text, result.mediaType)} />
+                    {result.mediaType ? <span className="rounded-full bg-slate-100 px-2 py-1 text-xs text-slate-600 dark:bg-slate-800 dark:text-slate-300">{result.mediaType}</span> : null}
+                  </div>
                 </div>
                 <SearchHitBody result={result} />
               </article>
