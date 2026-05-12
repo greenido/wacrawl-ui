@@ -1,0 +1,20 @@
+{
+  "name": "wacrawl-dashboard",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "apps/api",
+    "apps/web"
+  ],
+  "scripts": {
+    "dev": "concurrently \"npm run dev -w @wacrawl/api\" \"npm run dev -w @wacrawl/web\"",
+    "build": "npm run build -w @wacrawl/api && npm run build -w @wacrawl/web",
+    "test": "npm run test -w @wacrawl/api",
+    "preview": "npm run preview -w @wacrawl/web",
+    "typecheck": "npm run typecheck -w @wacrawl/api && npm run typecheck -w @wacrawl/web"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1",
+    "typescript": "^5.9.3"
+  }
+}
