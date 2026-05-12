@@ -144,32 +144,59 @@ export function getChats(params: { limit?: unknown; offset?: unknown; kind?: unk
   const limit = parseLimit(params.limit, 50, 200);
   const offset = parseOffset(params.offset);
   const kind = params.kind === 'direct' || params.kind === 'group' ? params.kind : undefined;
-  const where = kind ? 'WHERE chats.kind = @kind' : '';
+  const where = kind ? 'WHERE chats.kind = @kind' : 'WHERE chats.kind IN (\'direct\', \'group\')';
   const total = (db.prepare(`SELECT COUNT(*) AS count FROM chats ${where}`).get({ kind }) as CountRow).count;
 
   const rows = db.prepare(`
-    WITH latest AS (
-      SELECT chat_jid, text
+    WITH chat_page AS (
+      SELECT
+        chats.jid,
+        chats.kind,
+        chats.name,
+        chats.last_message_at
+      FROM chats
+      ${where}
+      ORDER BY COALESCE(chats.last_message_at, 0) DESC, chats.name COLLATE NOCASE ASC
+      LIMIT @limit OFFSET @offset
+    ),
+    message_stats AS (
+      SELECT
+        chat_jid,
+        ${cleanDisplayNameSql('MAX(chat_name)')} AS message_name,
+        COUNT(rowid) AS messageCount,
+        SUM(CASE WHEN media_type IS NOT NULL AND media_type <> '' THEN 1 ELSE 0 END) AS mediaCount,
+        COUNT(DISTINCT CASE WHEN from_me = 0 THEN sender_jid END) AS participantCount,
+        MAX(ts) AS lastMessageTs
       FROM messages
-      WHERE rowid IN (SELECT MAX(rowid) FROM messages GROUP BY chat_jid)
+      WHERE chat_jid IN (SELECT jid FROM chat_page)
+      GROUP BY chat_jid
+    ),
+    latest AS (
+      SELECT messages.chat_jid, messages.text
+      FROM messages
+      JOIN message_stats ON message_stats.chat_jid = messages.chat_jid
+      WHERE messages.rowid = (
+        SELECT latest_message.rowid
+        FROM messages AS latest_message
+        WHERE latest_message.chat_jid = messages.chat_jid
+        ORDER BY latest_message.ts DESC, latest_message.rowid DESC
+        LIMIT 1
+      )
     )
     SELECT
-      chats.jid,
-      chats.kind,
-      COALESCE(${cleanDisplayNameSql('chats.name')}, ${cleanDisplayNameSql('MAX(messages.chat_name)')}, ${contactDisplayNameSql('chat_contacts')}, ${cleanDisplayNameSql('chats.jid')}, 'Unknown') AS name,
-      COUNT(messages.rowid) AS messageCount,
-      SUM(CASE WHEN messages.media_type IS NOT NULL AND messages.media_type <> '' THEN 1 ELSE 0 END) AS mediaCount,
-      COUNT(DISTINCT CASE WHEN messages.from_me = 0 THEN messages.sender_jid END) AS participantCount,
-      MAX(messages.ts) AS lastMessageTs,
+      chat_page.jid,
+      chat_page.kind,
+      COALESCE(${cleanDisplayNameSql('chat_page.name')}, message_stats.message_name, ${contactDisplayNameSql('chat_contacts')}, ${cleanDisplayNameSql('chat_page.jid')}, 'Unknown') AS name,
+      message_stats.messageCount,
+      message_stats.mediaCount,
+      message_stats.participantCount,
+      message_stats.lastMessageTs,
       latest.text AS lastMessageText
-    FROM chats
-    LEFT JOIN messages ON messages.chat_jid = chats.jid
-    LEFT JOIN latest ON latest.chat_jid = chats.jid
-    LEFT JOIN contacts AS chat_contacts ON ${contactMatchSql('chat_contacts', 'chats.jid')}
-    ${where}
-    GROUP BY chats.jid
-    ORDER BY COALESCE(lastMessageTs, chats.last_message_at, 0) DESC, name COLLATE NOCASE ASC
-    LIMIT @limit OFFSET @offset
+    FROM chat_page
+    LEFT JOIN message_stats ON message_stats.chat_jid = chat_page.jid
+    LEFT JOIN latest ON latest.chat_jid = chat_page.jid
+    LEFT JOIN contacts AS chat_contacts ON ${contactMatchSql('chat_contacts', 'chat_page.jid')}
+    ORDER BY COALESCE(message_stats.lastMessageTs, chat_page.last_message_at, 0) DESC, name COLLATE NOCASE ASC
   `).all({ kind, limit, offset }) as ChatRow[];
 
   return asPagination(rows.map((row) => ({
@@ -218,7 +245,10 @@ export function getMediaItems(params: { limit?: unknown; offset?: unknown; type?
   const limit = parseLimit(params.limit, 60, 200);
   const offset = parseOffset(params.offset);
   const type = typeof params.type === 'string' && params.type.trim() ? params.type.trim() : undefined;
-  const where = type ? 'media_type = @type' : 'media_type IS NOT NULL AND media_type <> \'\'';
+  const hasMediaPath = 'media_path IS NOT NULL AND TRIM(media_path) <> \'\'';
+  const where = type
+    ? `media_type = @type AND ${hasMediaPath}`
+    : `media_type IS NOT NULL AND media_type <> '' AND ${hasMediaPath}`;
   const total = (db.prepare(`SELECT COUNT(*) AS count FROM messages WHERE ${where}`).get({ type }) as CountRow).count;
   const rows = db.prepare(`
     SELECT

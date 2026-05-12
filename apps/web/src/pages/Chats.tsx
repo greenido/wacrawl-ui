@@ -1,10 +1,13 @@
 import { useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { api, type ChatSummary, type MessageSummary } from '../api/client';
 import { Card, Skeleton } from '../components/ui/Card';
 import { cn } from '../lib/utils';
 import { displayNameOrUnknown, formatDateTime, formatNumber, isLidIdentifier } from '../lib/utils';
 
 export function Chats() {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const contactJid = searchParams.get('contact');
   const [chats, setChats] = useState<ChatSummary[]>([]);
   const [selected, setSelected] = useState<ChatSummary | null>(null);
   const [messages, setMessages] = useState<MessageSummary[]>([]);
@@ -18,7 +21,12 @@ export function Chats() {
       .then((result) => {
         if (!active) return;
         setChats(result.data);
-        setSelected(result.data[0] ?? null);
+        if (contactJid) {
+          const match = result.data.find((c) => c.jid === contactJid);
+          setSelected(match ?? result.data[0] ?? null);
+        } else {
+          setSelected(result.data[0] ?? null);
+        }
       })
       .catch((err: Error) => {
         if (active) setError(err.message);
@@ -29,7 +37,7 @@ export function Chats() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [contactJid]);
 
   useEffect(() => {
     if (!selected) return;
@@ -73,7 +81,10 @@ export function Chats() {
                 <button
                   key={chat.jid}
                   type="button"
-                  onClick={() => setSelected(chat)}
+                  onClick={() => {
+                    setSelected(chat);
+                    if (contactJid) setSearchParams({}, { replace: true });
+                  }}
                   className={cn(
                     'block w-full p-4 text-left transition hover:bg-slate-50 dark:hover:bg-slate-800',
                     selected?.jid === chat.jid && 'bg-brand-50 dark:bg-slate-800',

@@ -29,10 +29,12 @@ describe('data queries', () => {
 
   it('lists chats and paginates chat messages', () => {
     db = createTestDb();
+    db.prepare('INSERT INTO chats (jid, kind, name, last_message_at) VALUES (?, ?, ?, ?)').run('0@status', 'status', 'WhatsApp Status', 1_700_500_000);
 
     const chats = getChats({ limit: '5' }, db);
     const family = chats.data.find((chat) => chat.jid === 'family@g.us');
 
+    expect(chats.data.map((chat) => chat.kind)).not.toContain('status');
     expect(family).toMatchObject({
       kind: 'group',
       name: 'Family Group',
@@ -57,6 +59,25 @@ describe('data queries', () => {
       mediaPath: '/tmp/voice.ogg',
       fileUrl: '/api/media/file?path=%2Ftmp%2Fvoice.ogg',
     });
+  });
+
+  it('does not list media rows without file paths', () => {
+    db = createTestDb();
+    const insertMessage = db.prepare(`
+      INSERT INTO messages (
+        source_pk, chat_jid, chat_name, msg_id, sender_jid, sender_name, ts,
+        from_me, text, raw_type, message_type, media_type, media_path, media_size
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    insertMessage.run(7, 'family@g.us', 'Family', 'm7', 'bob@s.whatsapp.net', 'Bob', 1_700_432_001, 0, 'missing image', 0, 'image', 'image', '', null);
+    insertMessage.run(8, 'family@g.us', 'Family', 'm8', 'bob@s.whatsapp.net', 'Bob', 1_700_432_002, 0, 'missing video', 0, 'video', 'video', null, null);
+
+    const media = getMediaItems({ limit: '10' }, db);
+
+    expect(media.data).toHaveLength(2);
+    expect(media.pagination.total).toBe(2);
+    expect(media.data.every((item) => item.mediaPath.trim().length > 0)).toBe(true);
   });
 
   it('searches text and names with snippets', () => {

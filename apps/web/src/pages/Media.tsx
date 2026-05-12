@@ -1,10 +1,43 @@
-import { X } from 'lucide-react';
+import { Music, Play, X } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { absoluteApiUrl, api, type MediaItem } from '../api/client';
 import { Card, Skeleton } from '../components/ui/Card';
 import { formatBytes, formatDateTime } from '../lib/utils';
 
 const PAGE_SIZE = 60;
+type PreviewKind = 'image' | 'video' | 'audio' | 'other';
+
+const extensionKinds: Record<string, PreviewKind> = {
+  jpg: 'image',
+  jpeg: 'image',
+  png: 'image',
+  gif: 'image',
+  webp: 'image',
+  heic: 'image',
+  heif: 'image',
+  mp4: 'video',
+  mov: 'video',
+  webm: 'video',
+  m4v: 'video',
+  '3gp': 'video',
+  ogg: 'audio',
+  oga: 'audio',
+  opus: 'audio',
+  mp3: 'audio',
+  m4a: 'audio',
+  aac: 'audio',
+  wav: 'audio',
+};
+
+function getPreviewKind(item: MediaItem): PreviewKind {
+  const type = item.mediaType.toLowerCase();
+  if (type.includes('image') || type.includes('photo') || type.includes('sticker')) return 'image';
+  if (type.includes('video')) return 'video';
+  if (type.includes('audio') || type.includes('voice') || type === 'ptt') return 'audio';
+
+  const extension = item.mediaPath.split(/[?#]/)[0].split('.').pop()?.toLowerCase();
+  return extension ? extensionKinds[extension] ?? 'other' : 'other';
+}
 
 export function Media() {
   const [items, setItems] = useState<MediaItem[]>([]);
@@ -69,26 +102,46 @@ export function Media() {
         <Card className="p-10 text-center text-slate-500 dark:border-slate-800 dark:bg-slate-900">No media files found.</Card>
       ) : (
         <div className="grid grid-cols-5 gap-4">
-          {items.map((item) => (
-            <button
-              key={item.id}
-              type="button"
-              onClick={() => setActiveItem(item)}
-              className="overflow-hidden rounded-2xl border border-slate-200 bg-white text-left shadow-sm transition [content-visibility:auto] hover:-translate-y-0.5 hover:shadow-md dark:border-slate-800 dark:bg-slate-900"
-            >
-              <div className="flex h-40 items-center justify-center bg-slate-100 dark:bg-slate-800">
-                {item.mediaType === 'image' ? (
-                  <img src={absoluteApiUrl(item.fileUrl)} alt={item.text ?? item.chatName} className="h-full w-full object-cover" loading="lazy" />
-                ) : (
-                  <span className="rounded-full bg-slate-900 px-3 py-1 text-xs font-semibold uppercase text-white">{item.mediaType}</span>
-                )}
-              </div>
-              <div className="space-y-1 p-3 text-sm">
-                <p className="truncate font-medium text-slate-950 dark:text-slate-50">{item.chatName}</p>
-                <p className="text-xs text-slate-500">{formatBytes(item.mediaSize)} · {formatDateTime(item.sentAt)}</p>
-              </div>
-            </button>
-          ))}
+          {items.map((item) => {
+            const fileUrl = absoluteApiUrl(item.fileUrl);
+            const previewKind = getPreviewKind(item);
+
+            return (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => setActiveItem(item)}
+                className="overflow-hidden rounded-2xl border border-slate-200 bg-white text-left shadow-sm transition [content-visibility:auto] hover:-translate-y-0.5 hover:shadow-md dark:border-slate-800 dark:bg-slate-900"
+                aria-label={`Open ${previewKind === 'other' ? item.mediaType : previewKind} from ${item.chatName}`}
+              >
+                <div className="relative flex h-40 items-center justify-center bg-slate-100 dark:bg-slate-800">
+                  {previewKind === 'image' ? (
+                    <img src={fileUrl} alt={item.text ?? item.chatName} className="h-full w-full object-cover" loading="lazy" />
+                  ) : previewKind === 'video' ? (
+                    <>
+                      <video src={fileUrl} className="h-full w-full object-cover" preload="metadata" muted playsInline />
+                      <span className="absolute rounded-full bg-slate-950/75 p-3 text-white">
+                        <Play className="h-5 w-5 fill-current" />
+                      </span>
+                    </>
+                  ) : previewKind === 'audio' ? (
+                    <div className="flex flex-col items-center gap-3 text-slate-700 dark:text-slate-200">
+                      <span className="rounded-full bg-slate-900 p-4 text-white dark:bg-slate-700">
+                        <Music className="h-6 w-6" />
+                      </span>
+                      <span className="text-xs font-semibold uppercase tracking-wide">Play audio</span>
+                    </div>
+                  ) : (
+                    <span className="rounded-full bg-slate-900 px-3 py-1 text-xs font-semibold uppercase text-white">{item.mediaType}</span>
+                  )}
+                </div>
+                <div className="space-y-1 p-3 text-sm">
+                  <p className="truncate font-medium text-slate-950 dark:text-slate-50">{item.chatName}</p>
+                  <p className="text-xs text-slate-500">{formatBytes(item.mediaSize)} · {formatDateTime(item.sentAt)}</p>
+                </div>
+              </button>
+            );
+          })}
         </div>
       )}
 
@@ -102,11 +155,7 @@ export function Media() {
             <X className="h-5 w-5" />
           </button>
           <div className="max-h-full max-w-5xl overflow-hidden rounded-3xl bg-white shadow-2xl dark:bg-slate-900">
-            {activeItem.mediaType === 'image' ? (
-              <img src={absoluteApiUrl(activeItem.fileUrl)} alt={activeItem.text ?? activeItem.chatName} className="max-h-[75vh] w-full object-contain" />
-            ) : (
-              <div className="flex h-80 w-[640px] items-center justify-center bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300">{activeItem.mediaType} file</div>
-            )}
+            <MediaPreview item={activeItem} />
             <div className="p-5">
               <h3 className="font-semibold text-slate-950 dark:text-slate-50">{activeItem.chatName}</h3>
               <p className="text-sm text-slate-500">{activeItem.mediaPath}</p>
@@ -115,5 +164,33 @@ export function Media() {
         </div>
       ) : null}
     </main>
+  );
+}
+
+function MediaPreview({ item }: { item: MediaItem }) {
+  const fileUrl = absoluteApiUrl(item.fileUrl);
+  const previewKind = getPreviewKind(item);
+
+  if (previewKind === 'image') {
+    return <img src={fileUrl} alt={item.text ?? item.chatName} className="max-h-[75vh] w-full object-contain" />;
+  }
+
+  if (previewKind === 'video') {
+    return <video src={fileUrl} className="max-h-[75vh] w-full bg-black" controls autoPlay playsInline />;
+  }
+
+  if (previewKind === 'audio') {
+    return (
+      <div className="flex w-[640px] max-w-[calc(100vw-4rem)] flex-col items-center gap-6 bg-slate-100 p-10 text-slate-700 dark:bg-slate-800 dark:text-slate-200">
+        <Music className="h-12 w-12" />
+        <audio src={fileUrl} className="w-full" controls autoPlay preload="metadata" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex h-80 w-[640px] max-w-[calc(100vw-4rem)] items-center justify-center bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+      {item.mediaType} file
+    </div>
   );
 }

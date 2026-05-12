@@ -2,6 +2,7 @@ import { format } from 'date-fns';
 import { useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import { Bar, BarChart, CartesianGrid, Line, LineChart, Tooltip, XAxis, YAxis } from 'recharts';
+import { useNavigate } from 'react-router-dom';
 import { ActivityHeatmap } from '../components/charts/ActivityHeatmap';
 import { MessageVolumeArea } from '../components/charts/MessageVolumeArea';
 import { TopContactsBar } from '../components/charts/TopContactsBar';
@@ -71,6 +72,7 @@ function ListCard({ title, children }: { title: string; children: ReactNode }) {
 }
 
 export function Dashboard() {
+  const navigate = useNavigate();
   const period = useAppStore((state) => state.period);
   const [overview, setOverview] = useState<OverviewStats | null>(null);
   const [topContacts, setTopContacts] = useState<TopContact[]>([]);
@@ -189,7 +191,7 @@ export function Dashboard() {
 
       <section className="grid grid-cols-2 gap-6">
         <MessageVolumeArea data={messageVolume} loading={loadingCharts} />
-        <TopContactsBar data={topContacts} loading={loadingCharts} />
+        <TopContactsBar data={topContacts} loading={loadingCharts} onContactClick={(jid) => navigate(`/chats?contact=${encodeURIComponent(jid)}`)} />
         <ActivityHeatmap data={heatmap} loading={loadingCharts} year={heatmapYear} />
         <CompactBarCard title="Hour of Day" data={hourOfDay.map((point) => ({ ...point, label: `${point.hour}:00` }))} dataKey="count" nameKey="label" loading={loadingCharts} />
         <CompactBarCard title="Day of Week" data={dayOfWeek.map((point) => ({ label: point.label, count: point.count }))} dataKey="count" nameKey="label" loading={loadingCharts} />
