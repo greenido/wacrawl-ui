@@ -99,12 +99,23 @@ export function Settings() {
       {error ? <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-900">{error}</div> : null}
 
       {health ? (
-        <Card className={`text-sm ${health.ok ? 'border-emerald-200 bg-emerald-50 dark:border-emerald-900 dark:bg-emerald-950/40' : 'border-amber-200 bg-amber-50 dark:border-amber-900 dark:bg-amber-950/40'}`}>
-          <p className="font-medium text-slate-900 dark:text-slate-100">
-            Primary database {health.ok ? 'opened successfully' : 'could not be opened'}
-          </p>
-          <p className="mt-1 text-slate-600 dark:text-slate-400">{health.paths.primaryDb}</p>
-        </Card>
+        <>
+          <Card className={`text-sm ${health.ok ? 'border-emerald-200 bg-emerald-50 dark:border-emerald-900 dark:bg-emerald-950/40' : 'border-amber-200 bg-amber-50 dark:border-amber-900 dark:bg-amber-950/40'}`}>
+            <p className="font-medium text-slate-900 dark:text-slate-100">
+              Primary database {health.ok ? 'opened successfully' : 'could not be opened'}
+            </p>
+            <p className="mt-1 text-slate-600 dark:text-slate-400">{health.paths.primaryDb}</p>
+          </Card>
+          {health.mediaAccessible === false ? (
+            <Card className="border-amber-200 bg-amber-50 text-sm dark:border-amber-900 dark:bg-amber-950/40">
+              <p className="font-semibold text-amber-900 dark:text-amber-200">Media directory not accessible</p>
+              <p className="mt-1 text-amber-800 dark:text-amber-300">{health.mediaError}</p>
+              <p className="mt-2 text-amber-700 dark:text-amber-400">
+                Media root: <code className="rounded bg-amber-100 px-1 py-0.5 text-xs dark:bg-amber-900/60">{health.paths.mediaRoot}</code>
+              </p>
+            </Card>
+          ) : null}
+        </>
       ) : null}
 
       {pathsMeta?.pathsFile ? (

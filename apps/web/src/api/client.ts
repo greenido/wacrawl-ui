@@ -170,6 +170,8 @@ export interface HealthResponse {
   ok: boolean;
   dbPath: string;
   paths: ResolvedArchivePaths;
+  mediaAccessible: boolean;
+  mediaError: string | null;
 }
 
 export interface PathsSettingsResponse {
