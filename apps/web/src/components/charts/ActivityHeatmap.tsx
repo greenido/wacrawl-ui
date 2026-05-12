@@ -1,5 +1,5 @@
 import { eachDayOfInterval, endOfYear, format, getDay, parseISO, startOfYear } from 'date-fns';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import type { ActivityHeatmapPoint } from '../../api/client';
 import { cn } from '../../lib/utils';
 import { Card, CardTitle, ClickableCard, Skeleton } from '../ui/Card';
@@ -27,6 +27,7 @@ type HoverTip = { x: number; y: number; date: string; count: number };
 
 export function ActivityHeatmap({ data, loading, year, onDeepDive }: ActivityHeatmapProps) {
   const [hoverTip, setHoverTip] = useState<HoverTip | null>(null);
+  const heatmapRef = useRef<HTMLDivElement | null>(null);
   const counts = new Map(data.map((point) => [point.date, point.count]));
   const days = eachDayOfInterval({
     start: startOfYear(new Date(year, 0, 1)),
@@ -62,7 +63,7 @@ export function ActivityHeatmap({ data, loading, year, onDeepDive }: ActivityHea
       {loading ? (
         <Skeleton className="h-40" />
       ) : (
-        <div className="relative overflow-x-auto rounded-xl bg-slate-50 p-4 dark:bg-slate-950/40">
+        <div ref={heatmapRef} className="relative overflow-x-auto rounded-xl bg-slate-50 p-4 dark:bg-slate-950/40">
           <div className="grid grid-flow-col grid-rows-7 gap-1">
             {cells.map((cell) =>
               cell.date ? (
@@ -70,10 +71,13 @@ export function ActivityHeatmap({ data, loading, year, onDeepDive }: ActivityHea
                   key={cell.key}
                   className="h-3 w-3"
                   onMouseEnter={(e) => {
-                    const rect = e.currentTarget.getBoundingClientRect();
+                    const cellRect = e.currentTarget.getBoundingClientRect();
+                    const heatmapRect = heatmapRef.current?.getBoundingClientRect();
+                    if (!heatmapRect) return;
+
                     setHoverTip({
-                      x: rect.left + rect.width / 2,
-                      y: rect.top,
+                      x: cellRect.left - heatmapRect.left + cellRect.width / 2,
+                      y: cellRect.top - heatmapRect.top,
                       date: cell.date,
                       count: cell.count,
                     });
@@ -91,7 +95,7 @@ export function ActivityHeatmap({ data, loading, year, onDeepDive }: ActivityHea
           {hoverTip ? (
             <div
               role="tooltip"
-              className="pointer-events-none fixed z-50 -translate-x-1/2 -translate-y-full rounded-md bg-slate-900 px-2 py-1.5 text-xs text-white shadow-lg dark:bg-slate-700"
+              className="pointer-events-none absolute z-20 -translate-x-1/2 -translate-y-full rounded-md bg-slate-900 px-2 py-1.5 text-xs text-white shadow-lg dark:bg-slate-700"
               style={{ left: hoverTip.x, top: hoverTip.y - 6 }}
             >
               <div className="font-medium">{format(parseISO(hoverTip.date), 'MMM d, yyyy')}</div>
