@@ -30,6 +30,14 @@ export function parseLimit(value: unknown, fallback = 10, max = 100): number {
   return Math.min(Math.floor(parsed), max);
 }
 
+export function parseOffset(value: unknown): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return 0;
+  }
+  return Math.floor(parsed);
+}
+
 export function parseYear(value: unknown): number {
   const parsed = Number(value);
   const currentYear = new Date().getFullYear();
