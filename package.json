@@ -1,7 +1,34 @@
 {
   "name": "wacrawl-dashboard",
   "version": "0.1.0",
-  "private": true,
+  "description": "Local WhatsApp analytics dashboard powered by a WaCrawl SQLite archive",
+  "keywords": [
+    "whatsapp",
+    "analytics",
+    "dashboard",
+    "wacrawl",
+    "sqlite"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/greenido/wacrawl-ui.git"
+  },
+  "homepage": "https://github.com/greenido/wacrawl-ui#readme",
+  "bugs": {
+    "url": "https://github.com/greenido/wacrawl-ui/issues"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "bin": {
+    "wacrawl-dashboard": "./bin/wacrawl-dashboard.js"
+  },
+  "files": [
+    "apps/api/dist",
+    "apps/web/dist",
+    "bin"
+  ],
   "workspaces": [
     "apps/api",
     "apps/web"
@@ -11,7 +38,16 @@
     "build": "npm run build -w @wacrawl/api && npm run build -w @wacrawl/web",
     "test": "npm run test -w @wacrawl/api",
     "preview": "npm run preview -w @wacrawl/web",
-    "typecheck": "npm run typecheck -w @wacrawl/api && npm run typecheck -w @wacrawl/web"
+    "typecheck": "npm run typecheck -w @wacrawl/api && npm run typecheck -w @wacrawl/web",
+    "prepublishOnly": "npm run build"
+  },
+  "dependencies": {
+    "better-sqlite3": "^12.4.6",
+    "cors": "^2.8.5",
+    "date-fns": "^4.1.0",
+    "dotenv": "^17.2.3",
+    "express": "^5.2.1",
+    "stopword": "^3.1.5"
   },
   "devDependencies": {
     "concurrently": "^9.2.1",

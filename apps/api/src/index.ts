@@ -15,6 +15,9 @@ const ALLOWED_ORIGINS = new Set([
   'http://127.0.0.1:5173',
   'http://localhost:4173',
   'http://127.0.0.1:4173',
+  // Also allow same-origin requests when API serves the web frontend directly
+  `http://localhost:${PORT}`,
+  `http://127.0.0.1:${PORT}`,
 ]);
 const ALLOWED_HOSTS = new Set([
   `localhost:${PORT}`,
@@ -79,7 +82,8 @@ export function createApp(): express.Express {
   app.use('/api/stats', statsRouter);
   app.use('/api', dataRouter);
 
-  app.use((_req, res) => {
+  // JSON 404 only for /api routes; non-API routes fall through to static serving below
+  app.use('/api', (_req, res) => {
     res.status(404).json({
       error: {
         code: 'NOT_FOUND',
@@ -87,6 +91,20 @@ export function createApp(): express.Express {
       },
     });
   });
+
+  // Production static file serving — set WACRAWL_STATIC_DIR to the web dist folder
+  const staticDir = process.env.WACRAWL_STATIC_DIR;
+  if (staticDir) {
+    app.use(express.static(staticDir));
+    // SPA fallback: unmatched non-API GET requests return index.html
+    app.use((req, res, next) => {
+      if (req.method !== 'GET' || req.path.startsWith('/api')) {
+        next();
+        return;
+      }
+      res.sendFile('index.html', { root: staticDir });
+    });
+  }
 
   const errorHandler: ErrorRequestHandler = (error, _req, res, _next) => {
     const code = error?.code === 'SQLITE_CANTOPEN' ? 'DATABASE_UNAVAILABLE' : 'INTERNAL_ERROR';
