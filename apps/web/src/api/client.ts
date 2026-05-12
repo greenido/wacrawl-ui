@@ -193,7 +193,8 @@ export const api = {
     request<MessageVolumePoint[]>('/api/stats/message-volume', { period, granularity }),
   activityHeatmap: (year = new Date().getFullYear()) =>
     request<ActivityHeatmapPoint[]>('/api/stats/activity-heatmap', { year }),
-  hourOfDay: (period: Period) => request<HourOfDayStat[]>('/api/stats/hour-of-day', { period }),
+  hourOfDay: (period: Period, timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone) =>
+    request<HourOfDayStat[]>('/api/stats/hour-of-day', { period, timeZone }),
   dayOfWeek: (period: Period) => request<DayOfWeekStat[]>('/api/stats/day-of-week', { period }),
   mediaBreakdown: (period: Period) => request<MediaBreakdownStat[]>('/api/stats/media-breakdown', { period }),
   mediaSenders: (period: Period, limit = 10) => request<MediaSenderStat[]>('/api/stats/media-senders', { period, limit }),

@@ -127,6 +127,7 @@ describe('stats queries', () => {
     db = createTestDb();
 
     expect(getHourOfDayStats({ period: 'all' }, db)[0]).toEqual({ hour: 22, count: 6 });
+    expect(getHourOfDayStats({ period: 'all', timeZone: 'America/Los_Angeles' }, db)[0]).toEqual({ hour: 14, count: 6 });
     expect(getDayOfWeekStats({ period: 'all' }, db).find((point) => point.day === 2)).toMatchObject({ day: 2, label: 'Tue', count: 1 });
     expect(getMediaBreakdown({ period: 'all' }, db)).toEqual([
       { mediaType: 'audio', count: 1, totalBytes: 50 },
