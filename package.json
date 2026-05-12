@@ -22,7 +22,7 @@
     "node": ">=20"
   },
   "bin": {
-    "wacrawl-dashboard": "./bin/wacrawl-dashboard.js"
+    "wacrawl-dashboard": "bin/wacrawl-dashboard.js"
   },
   "files": [
     "apps/api/dist",
