@@ -13,6 +13,7 @@ import {
   unixSecondsToIso,
   yearBounds,
 } from '../lib/query.js';
+import { hourInTimezone, resolveStatsTimeZone } from '../lib/timezone.js';
 import type {
   ActivityHeatmapPoint,
   DayOfWeekStat,
@@ -43,6 +44,7 @@ interface OverviewRow {
 interface TopContactRow {
   jid: string | null;
   name: string | null;
+  phone: string | null;
   messageCount: number;
   sentByMe: number;
   sentByThem: number;
@@ -56,11 +58,6 @@ interface MessageVolumeRow {
 
 interface ActivityHeatmapRow {
   date: string;
-  count: number;
-}
-
-interface HourOfDayRow {
-  hour: string;
   count: number;
 }
 
@@ -146,6 +143,7 @@ export function getTopContacts(params: { period?: unknown; limit?: unknown }, db
           ELSE COALESCE(sender_jid, chat_jid)
         END AS jid,
         ${contactDisplayNameSql('contacts')} AS contact_name,
+        contacts.phone AS contact_phone,
         ${cleanDisplayNameSql(`
           CASE
             WHEN from_me = 1 THEN messages.chat_name
@@ -185,6 +183,7 @@ export function getTopContacts(params: { period?: unknown; limit?: unknown }, db
         ${cleanDisplayNameSql('jid')},
         'Unknown'
       ) AS name,
+      MAX(contact_phone) AS phone,
       COUNT(*) AS messageCount,
       SUM(CASE WHEN from_me = 1 THEN 1 ELSE 0 END) AS sentByMe,
       SUM(CASE WHEN from_me = 0 THEN 1 ELSE 0 END) AS sentByThem
@@ -198,6 +197,7 @@ export function getTopContacts(params: { period?: unknown; limit?: unknown }, db
   return rows.map((row) => ({
     jid: row.jid ?? 'unknown',
     name: row.name ?? row.jid ?? 'Unknown',
+    phone: row.phone?.trim() ? row.phone.trim() : null,
     messageCount: row.messageCount,
     sentByMe: row.sentByMe ?? 0,
     sentByThem: row.sentByThem ?? 0,
@@ -245,17 +245,26 @@ export function getActivityHeatmap(params: { year?: unknown }, db: Database = ge
   `).all(bounds) as ActivityHeatmapRow[];
 }
 
-export function getHourOfDayStats(params: { period?: unknown }, db: Database = getDb()): HourOfDayStat[] {
+export function getHourOfDayStats(params: { period?: unknown; timeZone?: unknown }, db: Database = getDb()): HourOfDayStat[] {
   const since = sinceTimestamp(parsePeriod(params.period));
+  const timeZone = resolveStatsTimeZone(params.timeZone);
   const rows = db.prepare(`
-    SELECT strftime('%H', ts, 'unixepoch') AS hour, COUNT(*) AS count
+    SELECT ts
     FROM messages
     WHERE ts >= @since
-    GROUP BY hour
-    ORDER BY hour ASC
-  `).all({ since }) as HourOfDayRow[];
+  `).all({ since }) as { ts: number }[];
 
-  return rows.map((row) => ({ hour: Number(row.hour), count: row.count }));
+  const counts = new Array<number>(24).fill(0);
+  for (const row of rows) {
+    counts[hourInTimezone(row.ts, timeZone)] += 1;
+  }
+
+  const out: HourOfDayStat[] = [];
+  for (let hour = 0; hour < 24; hour += 1) {
+    const count = counts[hour] ?? 0;
+    if (count > 0) out.push({ hour, count });
+  }
+  return out;
 }
 
 export function getDayOfWeekStats(params: { period?: unknown }, db: Database = getDb()): DayOfWeekStat[] {

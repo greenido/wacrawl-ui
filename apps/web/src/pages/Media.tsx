@@ -3,40 +3,18 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { absoluteApiUrl, api, type MediaItem } from '../api/client';
 import { Card, Skeleton } from '../components/ui/Card';
 import { formatBytes, formatDateTime } from '../lib/utils';
+import { friendlyMediaLabel, isLikelyOpaqueMediaHandle, resolveMediaPreviewKind, type MediaPreviewKind as PreviewKind } from '../lib/messageMedia';
 
 const PAGE_SIZE = 60;
-type PreviewKind = 'image' | 'video' | 'audio' | 'other';
 
-const extensionKinds: Record<string, PreviewKind> = {
-  jpg: 'image',
-  jpeg: 'image',
-  png: 'image',
-  gif: 'image',
-  webp: 'image',
-  heic: 'image',
-  heif: 'image',
-  mp4: 'video',
-  mov: 'video',
-  webm: 'video',
-  m4v: 'video',
-  '3gp': 'video',
-  ogg: 'audio',
-  oga: 'audio',
-  opus: 'audio',
-  mp3: 'audio',
-  m4a: 'audio',
-  aac: 'audio',
-  wav: 'audio',
-};
+function mediaAltLabel(text: string | null | undefined, chatName: string, mediaType: string): string {
+  const t = text?.trim();
+  if (t && !isLikelyOpaqueMediaHandle(t)) return t;
+  return `${friendlyMediaLabel(mediaType)} · ${chatName}`;
+}
 
 function getPreviewKind(item: MediaItem): PreviewKind {
-  const type = item.mediaType.toLowerCase();
-  if (type.includes('image') || type.includes('photo') || type.includes('sticker')) return 'image';
-  if (type.includes('video')) return 'video';
-  if (type.includes('audio') || type.includes('voice') || type === 'ptt') return 'audio';
-
-  const extension = item.mediaPath.split(/[?#]/)[0].split('.').pop()?.toLowerCase();
-  return extension ? extensionKinds[extension] ?? 'other' : 'other';
+  return resolveMediaPreviewKind(item.mediaType, item.mediaPath) ?? 'other';
 }
 
 export function Media() {
@@ -116,7 +94,7 @@ export function Media() {
               >
                 <div className="relative flex h-40 items-center justify-center bg-slate-100 dark:bg-slate-800">
                   {previewKind === 'image' ? (
-                    <img src={fileUrl} alt={item.text ?? item.chatName} className="h-full w-full object-cover" loading="lazy" />
+                    <img src={fileUrl} alt={mediaAltLabel(item.text, item.chatName, item.mediaType)} className="h-full w-full object-cover" loading="lazy" />
                   ) : previewKind === 'video' ? (
                     <>
                       <video src={fileUrl} className="h-full w-full object-cover" preload="metadata" muted playsInline />
@@ -172,7 +150,7 @@ function MediaPreview({ item }: { item: MediaItem }) {
   const previewKind = getPreviewKind(item);
 
   if (previewKind === 'image') {
-    return <img src={fileUrl} alt={item.text ?? item.chatName} className="max-h-[75vh] w-full object-contain" />;
+    return <img src={fileUrl} alt={mediaAltLabel(item.text, item.chatName, item.mediaType)} className="max-h-[75vh] w-full object-contain" />;
   }
 
   if (previewKind === 'video') {

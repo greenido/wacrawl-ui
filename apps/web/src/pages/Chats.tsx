@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { api, type ChatSummary, type MessageSummary } from '../api/client';
+import { MessageContent } from '../components/MessageContent';
 import { Card, Skeleton } from '../components/ui/Card';
+import { chatPreviewLine } from '../lib/messageMedia';
 import { cn } from '../lib/utils';
 import { displayNameOrUnknown, formatDateTime, formatNumber, isLidIdentifier } from '../lib/utils';
 
@@ -94,7 +96,7 @@ export function Chats() {
                     <h3 className="font-semibold text-slate-950 dark:text-slate-50">{chat.name}</h3>
                     <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs capitalize text-slate-600 dark:bg-slate-800 dark:text-slate-300">{chat.kind}</span>
                   </div>
-                  <p className="mt-1 truncate text-sm text-slate-500">{chat.lastMessageText ?? 'No preview'}</p>
+                  <p className="mt-1 truncate text-sm text-slate-500">{chatPreviewLine(chat.lastMessageText, chat.lastMessageMediaType)}</p>
                   <p className="mt-2 text-xs text-slate-400">{formatNumber(chat.messageCount)} messages · {formatDateTime(chat.lastMessageAt)}</p>
                 </button>
               ))}
@@ -119,7 +121,11 @@ export function Chats() {
                         <span>{message.fromMe ? 'Me' : displayNameOrUnknown(message.senderName, message.senderJid)}</span>
                         <span>{formatDateTime(message.sentAt)}</span>
                       </div>
-                      <p className="whitespace-pre-wrap text-sm text-slate-800 dark:text-slate-100">{message.text ?? `[${message.mediaType ?? message.messageType ?? 'message'}]`}</p>
+                      <MessageContent
+                        text={message.text}
+                        mediaType={message.mediaType}
+                        mediaPath={message.mediaPath}
+                      />
                     </article>
                   ))}
                 </div>

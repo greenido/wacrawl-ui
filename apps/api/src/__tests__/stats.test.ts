@@ -47,10 +47,18 @@ describe('stats queries', () => {
     expect(contacts[0]).toMatchObject({
       jid: 'alice@s.whatsapp.net',
       name: 'Alice',
+      phone: null,
       messageCount: 3,
       sentByMe: 2,
       sentByThem: 1,
     });
+  });
+
+  it('includes contact phone in top contacts when present', () => {
+    db = createTestDb();
+    db.prepare('UPDATE contacts SET phone = ? WHERE jid = ?').run('+15551234567', 'alice@s.whatsapp.net');
+    const contacts = getTopContacts({ period: 'all', limit: '5' }, db);
+    expect(contacts.find((c) => c.jid === 'alice@s.whatsapp.net')?.phone).toBe('+15551234567');
   });
 
   it('falls back to contact or chat names when sender names are encoded placeholders', () => {

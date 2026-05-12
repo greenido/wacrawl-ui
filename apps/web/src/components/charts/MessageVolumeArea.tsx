@@ -1,15 +1,16 @@
 import { Area, AreaChart, CartesianGrid, Tooltip, XAxis, YAxis } from 'recharts';
 import type { MessageVolumePoint } from '../../api/client';
-import { Card, CardTitle, Skeleton } from '../ui/Card';
+import { Card, CardTitle, ClickableCard, Skeleton } from '../ui/Card';
 
 interface MessageVolumeAreaProps {
   data: MessageVolumePoint[];
   loading: boolean;
+  onDeepDive?: () => void;
 }
 
-export function MessageVolumeArea({ data, loading }: MessageVolumeAreaProps) {
-  return (
-    <Card className="col-span-2">
+export function MessageVolumeArea({ data, loading, onDeepDive }: MessageVolumeAreaProps) {
+  const content = (
+    <>
       <div className="mb-4 flex items-center justify-between">
         <CardTitle>Message Volume</CardTitle>
         <p className="text-sm text-slate-500">Sent vs received</p>
@@ -42,6 +43,16 @@ export function MessageVolumeArea({ data, loading }: MessageVolumeAreaProps) {
           </AreaChart>
         </div>
       )}
-    </Card>
+    </>
   );
+
+  if (onDeepDive) {
+    return (
+      <ClickableCard className="col-span-2" onActivate={onDeepDive} aria-label="Open message volume deep dive">
+        {content}
+      </ClickableCard>
+    );
+  }
+
+  return <Card className="col-span-2">{content}</Card>;
 }

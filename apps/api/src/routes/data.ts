@@ -3,6 +3,7 @@ import type { Database } from 'better-sqlite3';
 import { getDb } from '../db.js';
 import { cleanDisplayNameSql, contactDisplayNameSql, contactMatchSql } from '../lib/displayName.js';
 import { parseLimit, parseOffset, unixSecondsToIso } from '../lib/query.js';
+import { hasMessageSearchIndex, MESSAGE_SEARCH_FTS_TABLE } from '../lib/searchIndex.js';
 import type { ChatSummary, ListResponse, MediaItem, MessageSummary, PersonSummary, SearchResult } from '../types.js';
 
 interface CountRow {
@@ -28,6 +29,7 @@ interface ChatRow {
   participantCount: number;
   lastMessageTs: number | null;
   lastMessageText: string | null;
+  lastMessageMediaType: string | null;
 }
 
 interface MessageRow {
@@ -44,6 +46,10 @@ interface MessageRow {
   mediaType: string | null;
   mediaPath: string | null;
   mediaSize?: number | null;
+}
+
+interface SearchMessageRow extends MessageRow {
+  snippet?: string | null;
 }
 
 function asPagination<T>(data: T[], limit: number, offset: number, total: number): ListResponse<T> {
@@ -69,6 +75,35 @@ function mapMessage(row: MessageRow): MessageSummary {
 
 function escapeLike(value: string): string {
   return value.replace(/[\\%_]/g, (match) => `\\${match}`);
+}
+
+function buildFtsQuery(query: string): string | null {
+  const terms = query
+    .toLowerCase()
+    .match(/[\p{L}\p{N}]+/gu)
+    ?.filter((term) => term.length > 0)
+    .slice(0, 8);
+
+  if (!terms?.length) {
+    return null;
+  }
+
+  return terms.map((term) => `"${term.replace(/"/g, '""')}"*`).join(' AND ');
+}
+
+function formatSearchResults(rows: SearchMessageRow[], query: string, limit: number, offset: number, total: number): ListResponse<SearchResult> {
+  return asPagination(rows.map((row) => {
+    const message = mapMessage(row);
+    const text = row.text ?? row.chatName ?? '';
+    const ftsSnippet = row.snippet?.trim();
+    const snippetSource = ftsSnippet || (text.toLowerCase().includes(query.toLowerCase())
+      ? text
+      : [row.chatName, row.senderName, text].filter(Boolean).join(' - '));
+    return {
+      ...message,
+      snippet: snippetSource.length > 180 ? `${snippetSource.slice(0, 177)}...` : snippetSource,
+    };
+  }), limit, offset, total);
 }
 
 export function getPeople(params: { limit?: unknown; offset?: unknown }, db: Database = getDb()): ListResponse<PersonSummary> {
@@ -172,7 +207,7 @@ export function getChats(params: { limit?: unknown; offset?: unknown; kind?: unk
       GROUP BY chat_jid
     ),
     latest AS (
-      SELECT messages.chat_jid, messages.text
+      SELECT messages.chat_jid, messages.text, messages.media_type AS lastMessageMediaType
       FROM messages
       JOIN message_stats ON message_stats.chat_jid = messages.chat_jid
       WHERE messages.rowid = (
@@ -191,7 +226,8 @@ export function getChats(params: { limit?: unknown; offset?: unknown; kind?: unk
       message_stats.mediaCount,
       message_stats.participantCount,
       message_stats.lastMessageTs,
-      latest.text AS lastMessageText
+      latest.text AS lastMessageText,
+      latest.lastMessageMediaType AS lastMessageMediaType
     FROM chat_page
     LEFT JOIN message_stats ON message_stats.chat_jid = chat_page.jid
     LEFT JOIN latest ON latest.chat_jid = chat_page.jid
@@ -208,6 +244,7 @@ export function getChats(params: { limit?: unknown; offset?: unknown; kind?: unk
     participantCount: row.participantCount ?? 0,
     lastMessageAt: unixSecondsToIso(row.lastMessageTs),
     lastMessageText: row.lastMessageText,
+    lastMessageMediaType: row.lastMessageMediaType,
   })), limit, offset, total);
 }
 
@@ -297,6 +334,51 @@ export function searchMessages(params: { q?: unknown; limit?: unknown; offset?: 
     return asPagination([], limit, offset, 0);
   }
 
+  const ftsQuery = buildFtsQuery(query);
+  if (ftsQuery && hasMessageSearchIndex(db)) {
+    try {
+      const total = (db.prepare(`
+        SELECT COUNT(*) AS count
+        FROM ${MESSAGE_SEARCH_FTS_TABLE}
+        WHERE ${MESSAGE_SEARCH_FTS_TABLE} MATCH @ftsQuery
+      `).get({ ftsQuery }) as CountRow).count;
+      const rows = db.prepare(`
+        WITH matched AS (
+          SELECT
+            rowid,
+            snippet(${MESSAGE_SEARCH_FTS_TABLE}, -1, '', '', '...', 20) AS snippet
+          FROM ${MESSAGE_SEARCH_FTS_TABLE}
+          WHERE ${MESSAGE_SEARCH_FTS_TABLE} MATCH @ftsQuery
+        )
+        SELECT
+          messages.rowid AS id,
+          msg_id AS msgId,
+          chat_jid AS chatJid,
+          COALESCE(${cleanDisplayNameSql('chats.name')}, ${cleanDisplayNameSql('messages.chat_name')}, ${contactDisplayNameSql('chat_contacts')}, ${cleanDisplayNameSql('messages.chat_jid')}, 'Unknown') AS chatName,
+          sender_jid AS senderJid,
+          COALESCE(${cleanDisplayNameSql('messages.sender_name')}, ${contactDisplayNameSql('sender_contacts')}) AS senderName,
+          ts,
+          from_me AS fromMe,
+          text,
+          message_type AS messageType,
+          media_type AS mediaType,
+          media_path AS mediaPath,
+          matched.snippet AS snippet
+        FROM matched
+        JOIN messages ON messages.rowid = matched.rowid
+        LEFT JOIN chats ON chats.jid = messages.chat_jid
+        LEFT JOIN contacts AS chat_contacts ON ${contactMatchSql('chat_contacts', 'messages.chat_jid')}
+        LEFT JOIN contacts AS sender_contacts ON ${contactMatchSql('sender_contacts', 'messages.sender_jid')}
+        ORDER BY ts DESC, messages.rowid DESC
+        LIMIT @limit OFFSET @offset
+      `).all({ ftsQuery, limit, offset }) as SearchMessageRow[];
+
+      return formatSearchResults(rows, query, limit, offset, total);
+    } catch {
+      // If an older archive has an incompatible FTS table, keep search working.
+    }
+  }
+
   const like = `%${escapeLike(query)}%`;
   const where = `
     (messages.text LIKE @like ESCAPE '\\'
@@ -335,19 +417,9 @@ export function searchMessages(params: { q?: unknown; limit?: unknown; offset?: 
     WHERE ${where}
     ORDER BY ts DESC, messages.rowid DESC
     LIMIT @limit OFFSET @offset
-  `).all({ like, limit, offset }) as MessageRow[];
+  `).all({ like, limit, offset }) as SearchMessageRow[];
 
-  return asPagination(rows.map((row) => {
-    const message = mapMessage(row);
-    const text = row.text ?? row.chatName ?? '';
-    const snippetSource = text.toLowerCase().includes(query.toLowerCase())
-      ? text
-      : [row.chatName, row.senderName, text].filter(Boolean).join(' - ');
-    return {
-      ...message,
-      snippet: snippetSource.length > 180 ? `${snippetSource.slice(0, 177)}...` : snippetSource,
-    };
-  }), limit, offset, total);
+  return formatSearchResults(rows, query, limit, offset, total);
 }
 
 export const dataRouter = Router();

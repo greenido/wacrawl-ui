@@ -1,22 +1,54 @@
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import type { TopContact } from '../../api/client';
 import { formatNumber } from '../../lib/utils';
-import { Card, CardTitle, Skeleton } from '../ui/Card';
+import { Card, CardTitle, ClickableCard, Skeleton } from '../ui/Card';
+
+type TopContactChartRow = TopContact & { phone?: string | null; shortName: string };
+type TopContactTooltipPayload = ReadonlyArray<{ payload?: unknown }>;
+
+function TopContactTooltip({ active, payload }: { active?: boolean; payload?: TopContactTooltipPayload }) {
+  if (!active || !payload?.[0]) return null;
+  const row = payload[0].payload as TopContactChartRow | undefined;
+  if (!row) return null;
+
+  return (
+    <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm shadow-md">
+      <div className="font-medium text-slate-900">{row.name}</div>
+      {row.phone ? <div className="mt-1 text-slate-600">Phone: {row.phone}</div> : null}
+      <div className="mt-1 text-slate-600">
+        <span className="text-slate-500">Messages</span>{' '}
+        <span className="font-medium text-slate-800">{formatNumber(row.messageCount)}</span>
+      </div>
+    </div>
+  );
+}
 
 interface TopContactsBarProps {
   data: TopContact[];
   loading: boolean;
   onContactClick?: (jid: string) => void;
+  onDeepDive?: () => void;
 }
 
-export function TopContactsBar({ data, loading, onContactClick }: TopContactsBarProps) {
+function stopPropagation(event: unknown) {
+  if (
+    event &&
+    typeof event === 'object' &&
+    'stopPropagation' in event &&
+    typeof event.stopPropagation === 'function'
+  ) {
+    event.stopPropagation();
+  }
+}
+
+export function TopContactsBar({ data, loading, onContactClick, onDeepDive }: TopContactsBarProps) {
   const chartData = data.map((contact) => ({
     ...contact,
     shortName: contact.name.length > 24 ? `${contact.name.slice(0, 24)}...` : contact.name,
   }));
 
-  return (
-    <Card className="col-span-2">
+  const content = (
+    <>
       <div className="mb-4">
         <CardTitle>Top Contacts</CardTitle>
         <p className="text-sm text-slate-500">Most active conversations — click a contact to see all chats</p>
@@ -35,7 +67,9 @@ export function TopContactsBar({ data, loading, onContactClick }: TopContactsBar
               <XAxis type="number" tick={{ fontSize: 12 }} tickLine={false} axisLine={false} />
               <YAxis dataKey="shortName" type="category" tick={{ fontSize: 13 }} tickLine={false} axisLine={false} width={160} />
               <Tooltip
-                formatter={(value) => formatNumber(Number(value))}
+                content={(props) => (
+                  <TopContactTooltip active={props.active} payload={props.payload as unknown as TopContactTooltipPayload} />
+                )}
                 cursor={{ fill: 'rgba(34,197,94,0.08)' }}
               />
               <Bar
@@ -44,7 +78,8 @@ export function TopContactsBar({ data, loading, onContactClick }: TopContactsBar
                 fill="#22c55e"
                 radius={[0, 8, 8, 0]}
                 cursor={onContactClick ? 'pointer' : undefined}
-                onClick={(entry) => {
+                onClick={(entry, _index, event) => {
+                  stopPropagation(event);
                   const jid = (entry as { payload?: Partial<TopContact> }).payload?.jid;
                   if (onContactClick && jid) onContactClick(jid);
                 }}
@@ -53,6 +88,16 @@ export function TopContactsBar({ data, loading, onContactClick }: TopContactsBar
           </ResponsiveContainer>
         </div>
       )}
-    </Card>
+    </>
   );
+
+  if (onDeepDive) {
+    return (
+      <ClickableCard className="col-span-2" onActivate={onDeepDive} aria-label="Open top contacts deep dive">
+        {content}
+      </ClickableCard>
+    );
+  }
+
+  return <Card className="col-span-2">{content}</Card>;
 }

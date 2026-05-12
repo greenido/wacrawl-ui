@@ -21,6 +21,7 @@ export interface OverviewStats {
 export interface TopContact {
   jid: string;
   name: string;
+  phone: string | null;
   messageCount: number;
   sentByMe: number;
   sentByThem: number;
@@ -67,6 +68,8 @@ export interface ChatSummary {
   participantCount: number;
   lastMessageAt: string | null;
   lastMessageText: string | null;
+  /** Media type of the latest message, when known — used for sidebar previews when text is an opaque key. */
+  lastMessageMediaType: string | null;
 }
 
 export interface MessageSummary {

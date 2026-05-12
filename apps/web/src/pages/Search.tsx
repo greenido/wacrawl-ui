@@ -1,8 +1,59 @@
-import { Search as SearchIcon } from 'lucide-react';
+import { Music, Search as SearchIcon } from 'lucide-react';
 import { useEffect, useState } from 'react';
-import { api, type SearchResult } from '../api/client';
+import { absoluteApiUrl, api, type SearchResult } from '../api/client';
+import { TextWithLinks } from '../components/MessageContent';
 import { Card, Skeleton } from '../components/ui/Card';
+import { humanizeMixedSnippet, resolveMediaPreviewKind } from '../lib/messageMedia';
 import { displayNameOrUnknown, formatDateTime } from '../lib/utils';
+
+function SearchHitBody({ result }: { result: SearchResult }) {
+  const kind = resolveMediaPreviewKind(result.mediaType, result.mediaPath);
+  const path = result.mediaPath?.trim();
+  const fileUrl = path ? absoluteApiUrl(`/api/media/file?path=${encodeURIComponent(path)}`) : null;
+  const showThumb = Boolean(fileUrl && (kind === 'image' || kind === 'video'));
+
+  const snippetRaw = result.snippet?.trim() ?? '';
+  const snippetDisplay = snippetRaw ? humanizeMixedSnippet(result.snippet!, result.mediaType) : null;
+
+  return (
+    <div className="mt-3 flex gap-3">
+      {showThumb && fileUrl ? (
+        <div className="h-16 w-16 shrink-0 overflow-hidden rounded-xl bg-slate-100 ring-1 ring-slate-200 dark:bg-slate-800 dark:ring-slate-700">
+          {kind === 'image' ? (
+            <img src={fileUrl} alt="" className="h-full w-full object-cover" loading="lazy" />
+          ) : (
+            <video src={fileUrl} className="h-full w-full object-cover" muted playsInline preload="metadata" />
+          )}
+        </div>
+      ) : null}
+      <div className="min-w-0 flex-1 space-y-2">
+        {snippetDisplay ? (
+          <p className="whitespace-pre-wrap text-sm text-slate-700 dark:text-slate-200">
+            <TextWithLinks text={snippetDisplay} />
+          </p>
+        ) : fileUrl ? null : (
+          <p className="text-sm text-slate-500 dark:text-slate-400">[No text]</p>
+        )}
+        {fileUrl && kind === 'audio' ? (
+          <div className="flex items-center gap-2 rounded-lg bg-slate-50 px-2 py-1 dark:bg-slate-800/80">
+            <Music className="h-4 w-4 shrink-0 text-slate-600 dark:text-slate-400" aria-hidden />
+            <audio src={fileUrl} className="min-w-0 flex-1" controls preload="metadata" />
+          </div>
+        ) : null}
+        {fileUrl && kind === 'other' ? (
+          <a
+            href={fileUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex text-sm font-medium text-brand-600 underline-offset-2 hover:underline dark:text-brand-400"
+          >
+            Open attachment
+          </a>
+        ) : null}
+      </div>
+    </div>
+  );
+}
 
 export function Search() {
   const [query, setQuery] = useState('');
@@ -82,7 +133,7 @@ export function Search() {
                   </div>
                   {result.mediaType ? <span className="rounded-full bg-slate-100 px-2 py-1 text-xs text-slate-600 dark:bg-slate-800 dark:text-slate-300">{result.mediaType}</span> : null}
                 </div>
-                <p className="mt-3 whitespace-pre-wrap text-sm text-slate-700 dark:text-slate-200">{result.snippet || '[No text]'}</p>
+                <SearchHitBody result={result} />
               </article>
             ))}
           </div>

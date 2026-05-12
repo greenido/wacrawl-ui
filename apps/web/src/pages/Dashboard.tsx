@@ -6,7 +6,7 @@ import { useNavigate } from 'react-router-dom';
 import { ActivityHeatmap } from '../components/charts/ActivityHeatmap';
 import { MessageVolumeArea } from '../components/charts/MessageVolumeArea';
 import { TopContactsBar } from '../components/charts/TopContactsBar';
-import { Card, CardTitle, Skeleton } from '../components/ui/Card';
+import { Card, CardTitle, ClickableCard, Skeleton } from '../components/ui/Card';
 import {
   api,
   type ActivityHeatmapPoint,
@@ -34,18 +34,41 @@ function formatDateRange(stats: OverviewStats | null): string {
   return `${format(new Date(stats.oldestMessage), 'MMM yyyy')} -> ${format(new Date(stats.newestMessage), 'MMM yyyy')}`;
 }
 
-function StatCard({ label, value, loading }: { label: string; value: string; loading: boolean }) {
-  return (
-    <Card className="p-4 dark:border-slate-800 dark:bg-slate-900">
+function StatCard({ label, value, loading, onDeepDive }: { label: string; value: string; loading: boolean; onDeepDive?: () => void }) {
+  const content = (
+    <>
       <p className="text-sm font-medium text-slate-500">{label}</p>
-      {loading ? <Skeleton className="mt-3 h-8 w-24" /> : <p className="mt-2 text-2xl font-semibold text-slate-950 dark:text-slate-50">{value}</p>}
+      {loading ? (
+        <Skeleton className="mt-3 h-8 max-w-full" />
+      ) : (
+        <p
+          className="mt-2 break-words font-semibold leading-tight tracking-tight text-slate-950 dark:text-slate-50"
+          style={{ fontSize: 'clamp(0.75rem, calc(0.45rem + 4.5cqw), 1.5rem)' }}
+        >
+          {value}
+        </p>
+      )}
+    </>
+  );
+
+  if (onDeepDive) {
+    return (
+      <ClickableCard className="@container min-w-0 p-4 dark:border-slate-800 dark:bg-slate-900" onActivate={onDeepDive} aria-label={`Open ${label} deep dive`}>
+        {content}
+      </ClickableCard>
+    );
+  }
+
+  return (
+    <Card className="@container min-w-0 p-4 dark:border-slate-800 dark:bg-slate-900">
+      {content}
     </Card>
   );
 }
 
-function CompactBarCard({ title, data, dataKey, nameKey, loading }: { title: string; data: Array<Record<string, string | number>>; dataKey: string; nameKey: string; loading: boolean }) {
-  return (
-    <Card className="dark:border-slate-800 dark:bg-slate-900">
+function CompactBarCard({ title, data, dataKey, nameKey, loading, onDeepDive }: { title: string; data: Array<Record<string, string | number>>; dataKey: string; nameKey: string; loading: boolean; onDeepDive?: () => void }) {
+  const content = (
+    <>
       <CardTitle className="dark:text-slate-50">{title}</CardTitle>
       {loading ? <Skeleton className="mt-4 h-64" /> : (
         <div className="mt-4 h-64 overflow-x-auto">
@@ -58,15 +81,43 @@ function CompactBarCard({ title, data, dataKey, nameKey, loading }: { title: str
           </BarChart>
         </div>
       )}
+    </>
+  );
+
+  if (onDeepDive) {
+    return (
+      <ClickableCard className="dark:border-slate-800 dark:bg-slate-900" onActivate={onDeepDive} aria-label={`Open ${title} deep dive`}>
+        {content}
+      </ClickableCard>
+    );
+  }
+
+  return (
+    <Card className="dark:border-slate-800 dark:bg-slate-900">
+      {content}
     </Card>
   );
 }
 
-function ListCard({ title, children }: { title: string; children: ReactNode }) {
-  return (
-    <Card className="dark:border-slate-800 dark:bg-slate-900">
+function ListCard({ title, children, onDeepDive }: { title: string; children: ReactNode; onDeepDive?: () => void }) {
+  const content = (
+    <>
       <CardTitle className="dark:text-slate-50">{title}</CardTitle>
       <div className="mt-4 space-y-3">{children}</div>
+    </>
+  );
+
+  if (onDeepDive) {
+    return (
+      <ClickableCard className="dark:border-slate-800 dark:bg-slate-900" onActivate={onDeepDive} aria-label={`Open ${title} deep dive`}>
+        {content}
+      </ClickableCard>
+    );
+  }
+
+  return (
+    <Card className="dark:border-slate-800 dark:bg-slate-900">
+      {content}
     </Card>
   );
 }
@@ -178,11 +229,11 @@ export function Dashboard() {
   return (
     <main className="space-y-6 p-8">
       <section className="grid grid-cols-5 gap-4">
-        <StatCard label="Messages" value={formatNumber(overview?.totalMessages ?? 0)} loading={loadingOverview} />
-        <StatCard label="Chats" value={formatNumber(overview?.totalChats ?? 0)} loading={loadingOverview} />
-        <StatCard label="Contacts" value={formatNumber(overview?.totalContacts ?? 0)} loading={loadingOverview} />
-        <StatCard label="Media Files" value={formatNumber(overview?.totalMediaFiles ?? 0)} loading={loadingOverview} />
-        <StatCard label="Archive Range" value={formatDateRange(overview)} loading={loadingOverview} />
+        <StatCard label="Messages" value={formatNumber(overview?.totalMessages ?? 0)} loading={loadingOverview} onDeepDive={() => navigate('/search')} />
+        <StatCard label="Chats" value={formatNumber(overview?.totalChats ?? 0)} loading={loadingOverview} onDeepDive={() => navigate('/chats')} />
+        <StatCard label="Contacts" value={formatNumber(overview?.totalContacts ?? 0)} loading={loadingOverview} onDeepDive={() => navigate('/people')} />
+        <StatCard label="Media Files" value={formatNumber(overview?.totalMediaFiles ?? 0)} loading={loadingOverview} onDeepDive={() => navigate('/media')} />
+        <StatCard label="Archive Range" value={formatDateRange(overview)} loading={loadingOverview} onDeepDive={() => navigate('/search')} />
       </section>
 
       {error ? (
@@ -190,12 +241,12 @@ export function Dashboard() {
       ) : null}
 
       <section className="grid grid-cols-2 gap-6">
-        <MessageVolumeArea data={messageVolume} loading={loadingCharts} />
-        <TopContactsBar data={topContacts} loading={loadingCharts} onContactClick={(jid) => navigate(`/chats?contact=${encodeURIComponent(jid)}`)} />
-        <ActivityHeatmap data={heatmap} loading={loadingCharts} year={heatmapYear} />
-        <CompactBarCard title="Hour of Day" data={hourOfDay.map((point) => ({ ...point, label: `${point.hour}:00` }))} dataKey="count" nameKey="label" loading={loadingCharts} />
-        <CompactBarCard title="Day of Week" data={dayOfWeek.map((point) => ({ label: point.label, count: point.count }))} dataKey="count" nameKey="label" loading={loadingCharts} />
-        <Card className="dark:border-slate-800 dark:bg-slate-900">
+        <MessageVolumeArea data={messageVolume} loading={loadingCharts} onDeepDive={() => navigate('/chats')} />
+        <TopContactsBar data={topContacts} loading={loadingCharts} onContactClick={(jid) => navigate(`/chats?contact=${encodeURIComponent(jid)}`)} onDeepDive={() => navigate('/people')} />
+        <ActivityHeatmap data={heatmap} loading={loadingCharts} year={heatmapYear} onDeepDive={() => navigate('/chats')} />
+        <CompactBarCard title="Hour of Day" data={hourOfDay.map((point) => ({ ...point, label: `${point.hour}:00` }))} dataKey="count" nameKey="label" loading={loadingCharts} onDeepDive={() => navigate('/chats')} />
+        <CompactBarCard title="Day of Week" data={dayOfWeek.map((point) => ({ label: point.label, count: point.count }))} dataKey="count" nameKey="label" loading={loadingCharts} onDeepDive={() => navigate('/chats')} />
+        <ClickableCard className="dark:border-slate-800 dark:bg-slate-900" onActivate={() => navigate('/chats')} aria-label="Open sent vs received ratio deep dive">
           <CardTitle className="dark:text-slate-50">Monthly Sent vs Received Ratio</CardTitle>
           {loadingCharts ? <Skeleton className="mt-4 h-64" /> : (
             <div className="mt-4 h-64 overflow-x-auto">
@@ -210,8 +261,8 @@ export function Dashboard() {
               </LineChart>
             </div>
           )}
-        </Card>
-        <ListCard title="Media Breakdown">
+        </ClickableCard>
+        <ListCard title="Media Breakdown" onDeepDive={() => navigate('/media')}>
           {mediaBreakdown.map((item) => (
             <div key={item.mediaType} className="flex items-center justify-between rounded-xl bg-slate-50 px-3 py-2 text-sm dark:bg-slate-800">
               <span className="font-medium capitalize dark:text-slate-100">{item.mediaType}</span>
@@ -219,7 +270,7 @@ export function Dashboard() {
             </div>
           ))}
         </ListCard>
-        <ListCard title="Media Senders">
+        <ListCard title="Media Senders" onDeepDive={() => navigate('/media')}>
           {mediaSenders.map((sender) => (
             <div key={sender.jid} className="flex items-center justify-between rounded-xl bg-slate-50 px-3 py-2 text-sm dark:bg-slate-800">
               <span className="font-medium dark:text-slate-100">{sender.name}</span>
@@ -227,7 +278,7 @@ export function Dashboard() {
             </div>
           ))}
         </ListCard>
-        <ListCard title="Response Times">
+        <ListCard title="Response Times" onDeepDive={() => navigate('/chats')}>
           {responseTimes.map((item) => (
             <div key={item.jid} className="flex items-center justify-between rounded-xl bg-slate-50 px-3 py-2 text-sm dark:bg-slate-800">
               <span className="font-medium dark:text-slate-100">{item.name}</span>
@@ -235,7 +286,7 @@ export function Dashboard() {
             </div>
           ))}
         </ListCard>
-        <ListCard title="Group Activity">
+        <ListCard title="Group Activity" onDeepDive={() => navigate('/chats')}>
           {groupActivity.map((item) => (
             <div key={item.jid} className="flex items-center justify-between rounded-xl bg-slate-50 px-3 py-2 text-sm dark:bg-slate-800">
               <span className="font-medium dark:text-slate-100">{item.name}</span>
@@ -243,13 +294,13 @@ export function Dashboard() {
             </div>
           ))}
         </ListCard>
-        <ListCard title="Streaks">
+        <ListCard title="Streaks" onDeepDive={() => navigate('/chats')}>
           <div className="grid grid-cols-2 gap-3">
             <StatCard label="Current" value={`${streaks?.currentStreak ?? 0} days`} loading={loadingCharts} />
             <StatCard label="Longest" value={`${streaks?.longestStreak ?? 0} days`} loading={loadingCharts} />
           </div>
         </ListCard>
-        <ListCard title="Word Cloud">
+        <ListCard title="Word Cloud" onDeepDive={() => navigate('/search')}>
           <div className="flex flex-wrap gap-2">
             {wordCloud.map((term) => (
               <span key={term.text} className="rounded-full bg-brand-50 px-3 py-1 text-sm font-medium text-brand-600 dark:bg-brand-600/20 dark:text-brand-50" style={{ fontSize: `${Math.min(24, 12 + term.value * 2)}px` }}>

@@ -23,3 +23,13 @@ The API opens the database in readonly mode. Override the default database path 
 ```bash
 WACRAWL_DB=/path/to/wacrawl.db npm run dev -w @wacrawl/api
 ```
+
+## Search Optimization
+
+Prepare the SQLite archive with supporting indexes and an FTS5 search table:
+
+```bash
+npm run optimize-db -w @wacrawl/api
+```
+
+Use `WACRAWL_DB=/path/to/wacrawl.db` with the same command to optimize a non-default archive. Re-run this after `wacrawl sync` so the FTS table includes newly synced messages.

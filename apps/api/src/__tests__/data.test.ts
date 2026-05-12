@@ -1,5 +1,6 @@
 import type Database from 'better-sqlite3';
 import { afterEach, describe, expect, it } from 'vitest';
+import { createSearchIndexes } from '../lib/searchIndex.js';
 import { getChatMessages, getChats, getMediaItems, getPeople, searchMessages } from '../routes/data.js';
 import { createTestDb } from './testDb.js';
 
@@ -91,6 +92,21 @@ describe('data queries', () => {
       chatName: 'Family Group',
     });
     expect(results.data[0].snippet.toLowerCase()).toContain('family');
+  });
+
+  it('uses the FTS search index when it is available', () => {
+    db = createTestDb();
+    createSearchIndexes(db);
+    db.prepare('UPDATE contacts SET full_name = ? WHERE jid = ?').run('Renamed Contact', 'alice@s.whatsapp.net');
+
+    const results = searchMessages({ q: 'example', limit: '10' }, db);
+
+    expect(results.data).toHaveLength(3);
+    expect(results.data.every((result) => result.chatJid === 'alice@s.whatsapp.net')).toBe(true);
+    expect(results.data[0]).toMatchObject({
+      msgId: 'm6',
+      chatName: 'Alice',
+    });
   });
 
   it('resolves LID chat and sender identifiers to display names', () => {

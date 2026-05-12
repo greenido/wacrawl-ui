@@ -1,12 +1,14 @@
-import { eachDayOfInterval, endOfYear, format, getDay, startOfYear } from 'date-fns';
+import { eachDayOfInterval, endOfYear, format, getDay, parseISO, startOfYear } from 'date-fns';
+import { useState } from 'react';
 import type { ActivityHeatmapPoint } from '../../api/client';
 import { cn } from '../../lib/utils';
-import { Card, CardTitle, Skeleton } from '../ui/Card';
+import { Card, CardTitle, ClickableCard, Skeleton } from '../ui/Card';
 
 interface ActivityHeatmapProps {
   data: ActivityHeatmapPoint[];
   loading: boolean;
   year: number;
+  onDeepDive?: () => void;
 }
 
 type HeatmapCell =
@@ -21,7 +23,10 @@ function intensityClass(count: number): string {
   return 'bg-emerald-700';
 }
 
-export function ActivityHeatmap({ data, loading, year }: ActivityHeatmapProps) {
+type HoverTip = { x: number; y: number; date: string; count: number };
+
+export function ActivityHeatmap({ data, loading, year, onDeepDive }: ActivityHeatmapProps) {
+  const [hoverTip, setHoverTip] = useState<HoverTip | null>(null);
   const counts = new Map(data.map((point) => [point.date, point.count]));
   const days = eachDayOfInterval({
     start: startOfYear(new Date(year, 0, 1)),
@@ -37,8 +42,8 @@ export function ActivityHeatmap({ data, loading, year }: ActivityHeatmapProps) {
     };
   })];
 
-  return (
-    <Card className="col-span-2">
+  const content = (
+    <>
       <div className="mb-4 flex items-center justify-between">
         <div>
           <CardTitle>Activity Heatmap</CardTitle>
@@ -57,18 +62,56 @@ export function ActivityHeatmap({ data, loading, year }: ActivityHeatmapProps) {
       {loading ? (
         <Skeleton className="h-40" />
       ) : (
-        <div className="overflow-x-auto rounded-xl bg-slate-50 p-4">
+        <div className="relative overflow-x-auto rounded-xl bg-slate-50 p-4 dark:bg-slate-950/40">
           <div className="grid grid-flow-col grid-rows-7 gap-1">
-            {cells.map((cell) => (
-              <div
-                key={cell.key}
-                className={cn('h-3 w-3 rounded-sm', cell.date ? intensityClass(cell.count) : 'bg-transparent')}
-                title={cell.date ? `${cell.date}: ${cell.count} messages` : undefined}
-              />
-            ))}
+            {cells.map((cell) =>
+              cell.date ? (
+                <div
+                  key={cell.key}
+                  className="h-3 w-3"
+                  onMouseEnter={(e) => {
+                    const rect = e.currentTarget.getBoundingClientRect();
+                    setHoverTip({
+                      x: rect.left + rect.width / 2,
+                      y: rect.top,
+                      date: cell.date,
+                      count: cell.count,
+                    });
+                  }}
+                  onMouseLeave={() => setHoverTip(null)}
+                  aria-label={`${format(parseISO(cell.date), 'MMMM d, yyyy')}: ${cell.count} ${cell.count === 1 ? 'message' : 'messages'}`}
+                >
+                  <div className={cn('h-3 w-3 rounded-sm', intensityClass(cell.count))} />
+                </div>
+              ) : (
+                <div key={cell.key} className="h-3 w-3 bg-transparent" />
+              ),
+            )}
           </div>
+          {hoverTip ? (
+            <div
+              role="tooltip"
+              className="pointer-events-none fixed z-50 -translate-x-1/2 -translate-y-full rounded-md bg-slate-900 px-2 py-1.5 text-xs text-white shadow-lg dark:bg-slate-700"
+              style={{ left: hoverTip.x, top: hoverTip.y - 6 }}
+            >
+              <div className="font-medium">{format(parseISO(hoverTip.date), 'MMM d, yyyy')}</div>
+              <div className="text-slate-300 dark:text-slate-200">
+                Total messages: <span className="tabular-nums text-white">{hoverTip.count}</span>
+              </div>
+            </div>
+          ) : null}
         </div>
       )}
-    </Card>
+    </>
   );
+
+  if (onDeepDive) {
+    return (
+      <ClickableCard className="col-span-2" onActivate={onDeepDive} aria-label="Open activity heatmap deep dive">
+        {content}
+      </ClickableCard>
+    );
+  }
+
+  return <Card className="col-span-2">{content}</Card>;
 }
