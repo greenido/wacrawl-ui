@@ -2,6 +2,7 @@ import cors from 'cors';
 import 'dotenv/config';
 import express, { type ErrorRequestHandler } from 'express';
 import { getDbPath } from './db.js';
+import { dataRouter } from './routes/data.js';
 import { statsRouter } from './routes/stats.js';
 
 const PORT = Number(process.env.PORT ?? 3001);
@@ -54,6 +55,7 @@ export function createApp(): express.Express {
   });
 
   app.use('/api/stats', statsRouter);
+  app.use('/api', dataRouter);
 
   app.use((_req, res) => {
     res.status(404).json({

@@ -1,10 +1,13 @@
 import { create } from 'zustand';
 
 export type Period = 'day' | 'week' | 'month' | 'year' | 'all';
+export type Theme = 'light' | 'dark';
 
 interface AppState {
   period: Period;
+  theme: Theme;
   setPeriod: (period: Period) => void;
+  toggleTheme: () => void;
 }
 
 export const PERIOD_OPTIONS: Array<{ value: Period; label: string }> = [
@@ -17,5 +20,7 @@ export const PERIOD_OPTIONS: Array<{ value: Period; label: string }> = [
 
 export const useAppStore = create<AppState>((set) => ({
   period: 'year',
+  theme: 'light',
   setPeriod: (period) => set({ period }),
+  toggleTheme: () => set((state) => ({ theme: state.theme === 'light' ? 'dark' : 'light' })),
 }));

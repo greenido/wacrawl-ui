@@ -64,11 +64,42 @@ describe('data queries', () => {
 
     const results = searchMessages({ q: 'family', limit: '10' }, db);
 
-    expect(results.data).toHaveLength(2);
+    expect(results.data).toHaveLength(3);
     expect(results.data[0]).toMatchObject({
       chatJid: 'family@g.us',
-      chatName: 'Family',
+      chatName: 'Family Group',
     });
     expect(results.data[0].snippet.toLowerCase()).toContain('family');
+  });
+
+  it('resolves LID chat and sender identifiers to display names', () => {
+    db = createTestDb();
+    db.prepare('INSERT INTO chats (jid, kind, name, last_message_at) VALUES (?, ?, ?, ?)').run('89760605454342@lid', 'direct', 'Niv', 1_700_604_800);
+    db.prepare('INSERT INTO contacts (jid, full_name, first_name, lid) VALUES (?, ?, ?, ?)').run('972533351664@s.whatsapp.net', 'Eynan Tzabar', 'Eynan', '272528660545772@lid');
+    const insertMessage = db.prepare(`
+      INSERT INTO messages (
+        source_pk, chat_jid, chat_name, msg_id, sender_jid, sender_name, ts,
+        from_me, text, raw_type, message_type, media_type, media_path, media_size
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    insertMessage.run(7, '89760605454342@lid', '89760605454342@lid', 'm7', null, null, 1_700_518_400, 1, 'lid direct', 0, 'text', null, null, null);
+    insertMessage.run(8, 'family@g.us', 'Family', 'm8', '272528660545772@lid', 'IAA=', 1_700_604_800, 0, 'lid group', 0, 'image', 'image', '/tmp/lid.jpg', 25);
+
+    const chats = getChats({ limit: '10' }, db);
+    expect(chats.data.find((chat) => chat.jid === '89760605454342@lid')?.name).toBe('Niv');
+
+    const directMessages = getChatMessages('89760605454342@lid', { limit: '10' }, db);
+    expect(directMessages.data[0].chatName).toBe('Niv');
+
+    const groupMessages = getChatMessages('family@g.us', { limit: '10' }, db);
+    expect(groupMessages.data.find((message) => message.msgId === 'm8')?.senderName).toBe('Eynan Tzabar');
+
+    const media = getMediaItems({ limit: '10' }, db);
+    expect(media.data.find((item) => item.mediaPath === '/tmp/lid.jpg')?.senderName).toBe('Eynan Tzabar');
+
+    const results = searchMessages({ q: 'lid', limit: '10' }, db);
+    expect(results.data.find((result) => result.msgId === 'm7')?.chatName).toBe('Niv');
+    expect(results.data.find((result) => result.msgId === 'm8')?.senderName).toBe('Eynan Tzabar');
   });
 });

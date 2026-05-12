@@ -11,7 +11,13 @@ export function createTestDb(): Database.Database {
     );
     CREATE TABLE contacts (
       jid TEXT PRIMARY KEY,
-      full_name TEXT
+      phone TEXT,
+      full_name TEXT,
+      first_name TEXT,
+      last_name TEXT,
+      business_name TEXT,
+      username TEXT,
+      lid TEXT
     );
     CREATE TABLE messages (
       rowid INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -37,11 +43,11 @@ export function createTestDb(): Database.Database {
   insertChat.run('family@g.us', 'group', 'Family Group', 1_700_345_600);
   insertChat.run('quiet@s.whatsapp.net', 'direct', 'Quiet Contact', null);
 
-  const insertContact = db.prepare('INSERT INTO contacts (jid, full_name) VALUES (?, ?)');
-  insertContact.run('alice@s.whatsapp.net', 'Alice Example');
-  insertContact.run('bob@s.whatsapp.net', 'Bob Builder');
-  insertContact.run('carol@s.whatsapp.net', 'Carol Contact');
-  insertContact.run('dave@s.whatsapp.net', 'Dave Contact');
+  const insertContact = db.prepare('INSERT INTO contacts (jid, full_name, first_name, lid) VALUES (?, ?, ?, ?)');
+  insertContact.run('alice@s.whatsapp.net', 'Alice Example', 'Alice', null);
+  insertContact.run('bob@s.whatsapp.net', 'Bob Builder', 'Bob', null);
+  insertContact.run('carol@s.whatsapp.net', 'Carol Contact', 'Carol', null);
+  insertContact.run('dave@s.whatsapp.net', 'Dave Contact', 'Dave', null);
 
   const insertMessage = db.prepare(`
     INSERT INTO messages (

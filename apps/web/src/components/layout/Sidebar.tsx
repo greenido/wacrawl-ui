@@ -1,4 +1,4 @@
-import { BarChart3, Image, LayoutDashboard, MessageCircle, Search, Users } from 'lucide-react';
+import { BarChart3, HelpCircle, Image, LayoutDashboard, MessageCircle, Search, Users } from 'lucide-react';
 import { NavLink } from 'react-router-dom';
 import { cn } from '../../lib/utils';
 
@@ -10,7 +10,11 @@ const links = [
   { to: '/search', label: 'Search', icon: Search },
 ];
 
-export function Sidebar() {
+interface SidebarProps {
+  onOpenHelp: () => void;
+}
+
+export function Sidebar({ onOpenHelp }: SidebarProps) {
   return (
     <aside className="fixed inset-y-0 left-0 flex w-[220px] flex-col border-r border-slate-200 bg-slate-950 text-white">
       <div className="border-b border-white/10 p-5">
@@ -47,9 +51,19 @@ export function Sidebar() {
         })}
       </nav>
 
-      <div className="border-t border-white/10 p-4 text-xs text-white/50">
+      <div className="border-t border-white/10 p-4">
+        <button
+          type="button"
+          onClick={onOpenHelp}
+          className="mb-4 flex w-full items-center gap-2 rounded-xl bg-white/10 px-3 py-2 text-left text-sm font-medium text-white/80 transition hover:bg-white hover:text-slate-950"
+        >
+          <HelpCircle className="h-4 w-4" />
+          Help guide
+        </button>
+        <div className="text-xs text-white/50">
         <p>Archive stays local.</p>
         <p>No cloud sync.</p>
+        </div>
       </div>
     </aside>
   );
