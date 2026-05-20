@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import type { Database } from 'better-sqlite3';
 import { getDb } from '../db.js';
-import { cleanDisplayNameSql, contactDisplayNameSql, contactMatchSql } from '../lib/displayName.js';
+import { cleanDisplayNameSql, contactDisplayNameSql, contactLeftJoins } from '../lib/displayName.js';
 import {
   bucketDateSql,
   normalizeBucketDate,
@@ -140,14 +140,15 @@ export function getTopContacts(params: { period?: unknown; limit?: unknown }, db
     WITH normalized_messages AS (
       SELECT
         COALESCE(
-          contacts.jid,
+          contacts_jid.jid,
+          contacts_lid.jid,
           CASE
             WHEN from_me = 1 THEN chat_jid
             ELSE COALESCE(sender_jid, chat_jid)
           END
         ) AS jid,
         ${contactDisplayNameSql('contacts')} AS contact_name,
-        contacts.phone AS contact_phone,
+        COALESCE(contacts_jid.phone, contacts_lid.phone) AS contact_phone,
         ${cleanDisplayNameSql(`
           CASE
             WHEN from_me = 1 THEN messages.chat_name
@@ -172,7 +173,7 @@ export function getTopContacts(params: { period?: unknown; limit?: unknown }, db
         WHEN messages.from_me = 1 THEN messages.chat_jid
         ELSE COALESCE(messages.sender_jid, messages.chat_jid)
       END
-      LEFT JOIN contacts ON ${contactMatchSql('contacts', `CASE
+      ${contactLeftJoins('contacts', `CASE
         WHEN messages.from_me = 1 THEN messages.chat_jid
         ELSE COALESCE(messages.sender_jid, messages.chat_jid)
       END`)}
@@ -317,7 +318,7 @@ export function getMediaSenders(params: { period?: unknown; limit?: unknown }, d
         media_size
       FROM messages
       LEFT JOIN chats ON chats.jid = CASE WHEN messages.from_me = 1 THEN messages.chat_jid ELSE COALESCE(messages.sender_jid, messages.chat_jid) END
-      LEFT JOIN contacts ON ${contactMatchSql('contacts', 'CASE WHEN messages.from_me = 1 THEN messages.chat_jid ELSE COALESCE(messages.sender_jid, messages.chat_jid) END')}
+      ${contactLeftJoins('contacts', 'CASE WHEN messages.from_me = 1 THEN messages.chat_jid ELSE COALESCE(messages.sender_jid, messages.chat_jid) END')}
       WHERE ts >= @since AND media_type IS NOT NULL AND media_type <> ''
     )
     SELECT
@@ -383,7 +384,7 @@ export function getResponseTimes(params: { period?: unknown; limit?: unknown }, 
       ROUND(AVG(ts - previous_ts)) AS averageSeconds
     FROM ordered
     LEFT JOIN chats ON chats.jid = ordered.chat_jid
-    LEFT JOIN contacts AS chat_contacts ON ${contactMatchSql('chat_contacts', 'ordered.chat_jid')}
+    ${contactLeftJoins('chat_contacts', 'ordered.chat_jid')}
     WHERE previous_ts IS NOT NULL
       AND previous_from_me IS NOT NULL
       AND previous_from_me <> from_me
@@ -465,6 +466,8 @@ export function getWordCloud(params: { period?: unknown; limit?: unknown; filter
     SELECT text
     FROM messages
     WHERE ts >= @since AND text IS NOT NULL AND TRIM(text) <> ''
+    ORDER BY ts DESC
+    LIMIT 30000
   `).all({ since }) as TextRow[];
   const counts = new Map<string, number>();
 

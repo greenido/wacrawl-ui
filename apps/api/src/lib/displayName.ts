@@ -12,7 +12,7 @@ export function cleanDisplayNameSql(expression: string): string {
   `;
 }
 
-export function contactDisplayNameSql(alias: string): string {
+export function contactDisplayNameSingleSql(alias: string): string {
   return `
     COALESCE(
       ${cleanDisplayNameSql(`${alias}.full_name`)},
@@ -25,6 +25,21 @@ export function contactDisplayNameSql(alias: string): string {
   `;
 }
 
-export function contactMatchSql(alias: string, jidExpression: string): string {
-  return `(${alias}.jid = ${jidExpression} OR ${alias}.lid = ${jidExpression})`;
+export function contactDisplayNameSql(alias: string, isSplit = true): string {
+  if (!isSplit) {
+    return contactDisplayNameSingleSql(alias);
+  }
+  return `
+    COALESCE(
+      ${contactDisplayNameSingleSql(`${alias}_jid`)},
+      ${contactDisplayNameSingleSql(`${alias}_lid`)}
+    )
+  `;
+}
+
+export function contactLeftJoins(alias: string, jidExpression: string): string {
+  return `
+    LEFT JOIN contacts AS ${alias}_jid ON ${alias}_jid.jid = ${jidExpression}
+    LEFT JOIN contacts AS ${alias}_lid ON ${alias}_lid.lid = ${jidExpression}
+  `;
 }

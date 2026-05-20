@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import type { Database } from 'better-sqlite3';
 import { getDb } from '../db.js';
-import { cleanDisplayNameSql, contactDisplayNameSql, contactMatchSql } from '../lib/displayName.js';
+import { cleanDisplayNameSql, contactDisplayNameSql, contactLeftJoins } from '../lib/displayName.js';
 import { resolveArchiveMediaPath } from '../lib/mediaFsPath.js';
 import { parseLimit, parseOffset, unixSecondsToIso } from '../lib/query.js';
 import { hasMessageSearchIndex, MESSAGE_SEARCH_FTS_TABLE } from '../lib/searchIndex.js';
@@ -142,10 +142,10 @@ export function getPeople(params: { limit?: unknown; offset?: unknown }, db: Dat
         media_type
       FROM messages
       LEFT JOIN chats ON chats.jid = CASE WHEN messages.from_me = 1 THEN messages.chat_jid ELSE COALESCE(messages.sender_jid, messages.chat_jid) END
-      LEFT JOIN contacts ON ${contactMatchSql('contacts', 'CASE WHEN messages.from_me = 1 THEN messages.chat_jid ELSE COALESCE(messages.sender_jid, messages.chat_jid) END')}
+      ${contactLeftJoins('contacts', 'CASE WHEN messages.from_me = 1 THEN messages.chat_jid ELSE COALESCE(messages.sender_jid, messages.chat_jid) END')}
     ),
     all_people AS (
-      SELECT jid, ${contactDisplayNameSql('contacts')} AS contact_name, NULL AS message_name, NULL AS direct_chat_name, NULL AS from_me, NULL AS ts, NULL AS media_type
+      SELECT jid, ${contactDisplayNameSql('contacts', false)} AS contact_name, NULL AS message_name, NULL AS direct_chat_name, NULL AS from_me, NULL AS ts, NULL AS media_type
       FROM contacts
       UNION ALL
       SELECT jid, contact_name, message_name, direct_chat_name, from_me, ts, media_type FROM normalized_messages
@@ -176,12 +176,17 @@ export function getPeople(params: { limit?: unknown; offset?: unknown }, db: Dat
   })), limit, offset, total);
 }
 
-export function getChats(params: { limit?: unknown; offset?: unknown; kind?: unknown }, db: Database = getDb()): ListResponse<ChatSummary> {
+export function getChats(params: { limit?: unknown; offset?: unknown; kind?: unknown; jid?: unknown }, db: Database = getDb()): ListResponse<ChatSummary> {
   const limit = parseLimit(params.limit, 50, 200);
   const offset = parseOffset(params.offset);
   const kind = params.kind === 'direct' || params.kind === 'group' ? params.kind : undefined;
-  const where = kind ? 'WHERE chats.kind = @kind' : 'WHERE chats.kind IN (\'direct\', \'group\')';
-  const total = (db.prepare(`SELECT COUNT(*) AS count FROM chats ${where}`).get({ kind }) as CountRow).count;
+  const targetJid = typeof params.jid === 'string' && params.jid.trim() ? params.jid.trim() : undefined;
+
+  let where = kind ? 'WHERE chats.kind = @kind' : 'WHERE chats.kind IN (\'direct\', \'group\')';
+  if (targetJid) {
+    where = 'WHERE chats.jid = @targetJid';
+  }
+  const total = (db.prepare(`SELECT COUNT(*) AS count FROM chats ${where}`).get({ kind, targetJid }) as CountRow).count;
 
   const rows = db.prepare(`
     WITH chat_page AS (
@@ -232,9 +237,9 @@ export function getChats(params: { limit?: unknown; offset?: unknown; kind?: unk
     FROM chat_page
     LEFT JOIN message_stats ON message_stats.chat_jid = chat_page.jid
     LEFT JOIN latest ON latest.chat_jid = chat_page.jid
-    LEFT JOIN contacts AS chat_contacts ON ${contactMatchSql('chat_contacts', 'chat_page.jid')}
+    ${contactLeftJoins('chat_contacts', 'chat_page.jid')}
     ORDER BY COALESCE(message_stats.lastMessageTs, chat_page.last_message_at, 0) DESC, name COLLATE NOCASE ASC
-  `).all({ kind, limit, offset }) as ChatRow[];
+  `).all({ kind, limit, offset, targetJid }) as ChatRow[];
 
   return asPagination(rows.map((row) => ({
     jid: row.jid,
@@ -269,8 +274,8 @@ export function getChatMessages(chatJid: string, params: { limit?: unknown; offs
       media_path AS mediaPath
     FROM messages
     LEFT JOIN chats ON chats.jid = messages.chat_jid
-    LEFT JOIN contacts AS chat_contacts ON ${contactMatchSql('chat_contacts', 'messages.chat_jid')}
-    LEFT JOIN contacts AS sender_contacts ON ${contactMatchSql('sender_contacts', 'messages.sender_jid')}
+    ${contactLeftJoins('chat_contacts', 'messages.chat_jid')}
+    ${contactLeftJoins('sender_contacts', 'messages.sender_jid')}
     WHERE chat_jid = @chatJid
     ORDER BY ts DESC, messages.rowid DESC
     LIMIT @limit OFFSET @offset
@@ -304,8 +309,8 @@ export function getMediaItems(params: { limit?: unknown; offset?: unknown; type?
       media_size AS mediaSize
     FROM messages
     LEFT JOIN chats ON chats.jid = messages.chat_jid
-    LEFT JOIN contacts AS chat_contacts ON ${contactMatchSql('chat_contacts', 'messages.chat_jid')}
-    LEFT JOIN contacts AS sender_contacts ON ${contactMatchSql('sender_contacts', 'messages.sender_jid')}
+    ${contactLeftJoins('chat_contacts', 'messages.chat_jid')}
+    ${contactLeftJoins('sender_contacts', 'messages.sender_jid')}
     WHERE ${where}
     ORDER BY ts DESC, messages.rowid DESC
     LIMIT @limit OFFSET @offset
@@ -368,8 +373,8 @@ export function searchMessages(params: { q?: unknown; limit?: unknown; offset?: 
         FROM matched
         JOIN messages ON messages.rowid = matched.rowid
         LEFT JOIN chats ON chats.jid = messages.chat_jid
-        LEFT JOIN contacts AS chat_contacts ON ${contactMatchSql('chat_contacts', 'messages.chat_jid')}
-        LEFT JOIN contacts AS sender_contacts ON ${contactMatchSql('sender_contacts', 'messages.sender_jid')}
+        ${contactLeftJoins('chat_contacts', 'messages.chat_jid')}
+        ${contactLeftJoins('sender_contacts', 'messages.sender_jid')}
         ORDER BY ts DESC, messages.rowid DESC
         LIMIT @limit OFFSET @offset
       `).all({ ftsQuery, limit, offset }) as SearchMessageRow[];
@@ -393,8 +398,8 @@ export function searchMessages(params: { q?: unknown; limit?: unknown; offset?: 
     SELECT COUNT(*) AS count
     FROM messages
     LEFT JOIN chats ON chats.jid = messages.chat_jid
-    LEFT JOIN contacts AS chat_contacts ON ${contactMatchSql('chat_contacts', 'messages.chat_jid')}
-    LEFT JOIN contacts AS sender_contacts ON ${contactMatchSql('sender_contacts', 'messages.sender_jid')}
+    ${contactLeftJoins('chat_contacts', 'messages.chat_jid')}
+    ${contactLeftJoins('sender_contacts', 'messages.sender_jid')}
     WHERE ${where}
   `).get({ like }) as CountRow).count;
   const rows = db.prepare(`
@@ -413,8 +418,8 @@ export function searchMessages(params: { q?: unknown; limit?: unknown; offset?: 
       media_path AS mediaPath
     FROM messages
     LEFT JOIN chats ON chats.jid = messages.chat_jid
-    LEFT JOIN contacts AS chat_contacts ON ${contactMatchSql('chat_contacts', 'messages.chat_jid')}
-    LEFT JOIN contacts AS sender_contacts ON ${contactMatchSql('sender_contacts', 'messages.sender_jid')}
+    ${contactLeftJoins('chat_contacts', 'messages.chat_jid')}
+    ${contactLeftJoins('sender_contacts', 'messages.sender_jid')}
     WHERE ${where}
     ORDER BY ts DESC, messages.rowid DESC
     LIMIT @limit OFFSET @offset
@@ -493,4 +498,27 @@ dataRouter.get('/media/file', (req, res, next) => {
 
 dataRouter.get('/search', (req, res) => {
   res.json(searchMessages(req.query));
+});
+
+dataRouter.get('/messages/:id/offset', (req, res) => {
+  const id = Number(req.params.id);
+  if (isNaN(id)) {
+    res.status(400).json({ error: 'Invalid message ID' });
+    return;
+  }
+  const db = getDb();
+  const msg = db.prepare('SELECT chat_jid, ts FROM messages WHERE rowid = ?').get(id) as { chat_jid: string; ts: number } | undefined;
+  if (!msg) {
+    res.status(404).json({ error: 'Message not found' });
+    return;
+  }
+  const countRow = db.prepare(`
+    SELECT COUNT(*) AS count
+    FROM messages
+    WHERE chat_jid = ? AND (ts > ? OR (ts = ? AND rowid > ?))
+  `).get(msg.chat_jid, msg.ts, msg.ts, id) as { count: number };
+  res.json({
+    chatJid: msg.chat_jid,
+    offset: countRow.count
+  });
 });

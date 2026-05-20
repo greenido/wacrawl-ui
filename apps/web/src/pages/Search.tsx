@@ -1,6 +1,6 @@
 import { Music, Search as SearchIcon } from 'lucide-react';
 import { useEffect, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { absoluteApiUrl, api, type SearchResult } from '../api/client';
 import { TextWithLinks } from '../components/MessageContent';
 import { Card, Skeleton } from '../components/ui/Card';
@@ -41,7 +41,7 @@ function SearchHitBody({ result }: { result: SearchResult }) {
           <p className="text-sm text-slate-500 dark:text-slate-400">[No text]</p>
         )}
         {fileUrl && kind === 'audio' ? (
-          <div className="flex items-center gap-2 rounded-lg bg-slate-50 px-2 py-1 dark:bg-slate-800/80">
+          <div className="flex items-center gap-2 rounded-lg bg-slate-50 px-2 py-1 dark:bg-slate-800/80" onClick={(e) => e.stopPropagation()}>
             <Music className="h-4 w-4 shrink-0 text-slate-600 dark:text-slate-400" aria-hidden />
             <audio src={fileUrl} className="min-w-0 flex-1" controls preload="metadata" />
           </div>
@@ -51,6 +51,7 @@ function SearchHitBody({ result }: { result: SearchResult }) {
             href={fileUrl}
             target="_blank"
             rel="noopener noreferrer"
+            onClick={(e) => e.stopPropagation()}
             className="inline-flex text-sm font-medium text-brand-600 underline-offset-2 hover:underline dark:text-brand-400"
           >
             Open attachment
@@ -62,6 +63,7 @@ function SearchHitBody({ result }: { result: SearchResult }) {
 }
 
 export function Search() {
+  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<SearchResult[]>([]);
@@ -141,13 +143,17 @@ export function Search() {
         ) : (
           <div className="divide-y divide-slate-100 dark:divide-slate-800">
             {results.map((result) => (
-              <article key={result.id} className="py-4">
+              <article
+                key={result.id}
+                onClick={() => navigate(`/chats?contact=${encodeURIComponent(result.chatJid)}&msg=${result.id}`)}
+                className="group relative -mx-4 rounded-2xl p-4 transition-all duration-200 cursor-pointer hover:bg-slate-50/80 dark:hover:bg-slate-800/40"
+              >
                 <div className="flex items-start justify-between gap-4">
                   <div className="min-w-0 flex-1">
-                    <h3 className="font-semibold text-slate-950 dark:text-slate-50">{result.chatName}</h3>
+                    <h3 className="font-semibold text-slate-950 transition-colors group-hover:text-brand-600 dark:text-slate-50 dark:group-hover:text-brand-400">{result.chatName}</h3>
                     <p className="text-sm text-slate-500">{result.fromMe ? 'Me' : displayNameOrUnknown(result.senderName, result.senderJid)} · {formatDateTime(result.sentAt)}</p>
                   </div>
-                  <div className="flex shrink-0 items-start gap-2">
+                  <div className="flex shrink-0 items-start gap-2" onClick={(e) => e.stopPropagation()}>
                     <CopyButton text={searchHitClipboardText(result.snippet, result.text, result.mediaType)} />
                     {result.mediaType ? <span className="rounded-full bg-slate-100 px-2 py-1 text-xs text-slate-600 dark:bg-slate-800 dark:text-slate-300">{result.mediaType}</span> : null}
                   </div>

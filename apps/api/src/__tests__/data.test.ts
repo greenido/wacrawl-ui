@@ -139,4 +139,23 @@ describe('data queries', () => {
     expect(results.data.find((result) => result.msgId === 'm7')?.chatName).toBe('Niv');
     expect(results.data.find((result) => result.msgId === 'm8')?.senderName).toBe('Eynan Tzabar');
   });
+
+  it('supports JID filtering in getChats', () => {
+    db = createTestDb();
+    const chats = getChats({ jid: 'alice@s.whatsapp.net' }, db);
+    expect(chats.data).toHaveLength(1);
+    expect(chats.data[0].jid).toBe('alice@s.whatsapp.net');
+    expect(chats.pagination.total).toBe(1);
+  });
+
+  it('correctly calculates message offset', () => {
+    db = createTestDb();
+    const m4Row = db.prepare("SELECT rowid, ts FROM messages WHERE msg_id = 'm4'").get() as { rowid: number; ts: number };
+    const countRow = db.prepare(`
+      SELECT COUNT(*) AS count
+      FROM messages
+      WHERE chat_jid = 'family@g.us' AND (ts > ? OR (ts = ? AND rowid > ?))
+    `).get(m4Row.ts, m4Row.ts, m4Row.rowid) as { count: number };
+    expect(countRow.count).toBe(1);
+  });
 });
