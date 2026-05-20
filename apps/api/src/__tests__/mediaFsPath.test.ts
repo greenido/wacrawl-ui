@@ -1,9 +1,13 @@
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { getArchiveMediaRoot, resolveArchiveMediaPath } from '../lib/mediaFsPath.js';
 
 describe('mediaFsPath', () => {
+  beforeEach(() => {
+    vi.stubEnv('WACRAWL_PATHS_FILE', path.join(os.tmpdir(), 'non-existent-wacrawl-paths.json'));
+  });
+
   afterEach(() => {
     vi.unstubAllEnvs();
   });

@@ -1,5 +1,5 @@
 import type { Database } from 'better-sqlite3';
-import { cleanDisplayNameSql, contactDisplayNameSql, contactMatchSql } from './displayName.js';
+import { cleanDisplayNameSql, contactDisplayNameSql, contactLeftJoins } from './displayName.js';
 
 export const MESSAGE_SEARCH_FTS_TABLE = 'messages_fts';
 
@@ -60,7 +60,7 @@ export function createSearchIndexes(db: Database): void {
       COALESCE(${contactDisplayNameSql('sender_contacts')}, '')
     FROM messages
     LEFT JOIN chats ON chats.jid = messages.chat_jid
-    LEFT JOIN contacts AS chat_contacts ON ${contactMatchSql('chat_contacts', 'messages.chat_jid')}
-    LEFT JOIN contacts AS sender_contacts ON ${contactMatchSql('sender_contacts', 'messages.sender_jid')};
+    ${contactLeftJoins('chat_contacts', 'messages.chat_jid')}
+    ${contactLeftJoins('sender_contacts', 'messages.sender_jid')};
   `);
 }

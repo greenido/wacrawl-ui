@@ -140,6 +140,7 @@ export function Dashboard() {
   const [wordCloudAll, setWordCloudAll] = useState<WordCloudTerm[]>([]);
   const [wordCloudUseful, setWordCloudUseful] = useState<WordCloudTerm[]>([]);
   const [wordCloudTab, setWordCloudTab] = useState<'all' | 'useful'>('useful');
+  const [loadingWordCloudAll, setLoadingWordCloudAll] = useState(false);
   const [loadingOverview, setLoadingOverview] = useState(true);
   const [loadingCharts, setLoadingCharts] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -172,6 +173,7 @@ export function Dashboard() {
     let active = true;
     setLoadingCharts(true);
     setError(null);
+    setWordCloudAll([]);
 
     Promise.all([
       api.topContacts(period, 10),
@@ -185,10 +187,9 @@ export function Dashboard() {
       api.responseTimes(period, 6),
       api.groupActivity(period, 6),
       api.streaks(period),
-      api.wordCloud(period, 30, 'all'),
       api.wordCloud(period, 30, 'useful'),
     ])
-      .then(([contacts, volume, activity, hours, weekdays, mediaTypes, senders, ratio, responses, groups, streakData, wordsAll, wordsUseful]) => {
+      .then(([contacts, volume, activity, hours, weekdays, mediaTypes, senders, ratio, responses, groups, streakData, wordsUseful]) => {
         if (!active) return;
         setTopContacts(contacts);
         setMessageVolume(volume);
@@ -201,7 +202,6 @@ export function Dashboard() {
         setResponseTimes(responses);
         setGroupActivity(groups);
         setStreaks(streakData);
-        setWordCloudAll(wordsAll);
         setWordCloudUseful(wordsUseful);
       })
       .catch((err: Error) => {
@@ -215,6 +215,22 @@ export function Dashboard() {
       active = false;
     };
   }, [heatmapYear, period]);
+
+  useEffect(() => {
+    if (wordCloudTab === 'all' && wordCloudAll.length === 0 && !loadingWordCloudAll) {
+      setLoadingWordCloudAll(true);
+      api.wordCloud(period, 30, 'all')
+        .then((words) => {
+          setWordCloudAll(words);
+        })
+        .catch((err: Error) => {
+          console.error('Failed to load all word cloud words:', err);
+        })
+        .finally(() => {
+          setLoadingWordCloudAll(false);
+        });
+    }
+  }, [wordCloudTab, period, wordCloudAll.length, loadingWordCloudAll]);
 
   if (error && !overview && topContacts.length === 0 && messageVolume.length === 0) {
     return (
@@ -357,7 +373,7 @@ export function Dashboard() {
                 All words
               </button>
             </div>
-            {loadingCharts ? (
+            {loadingCharts || (wordCloudTab === 'all' && loadingWordCloudAll) ? (
               <Skeleton className="h-24 rounded-xl" />
             ) : (
               <div
