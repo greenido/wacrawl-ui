@@ -176,12 +176,17 @@ export function getPeople(params: { limit?: unknown; offset?: unknown }, db: Dat
   })), limit, offset, total);
 }
 
-export function getChats(params: { limit?: unknown; offset?: unknown; kind?: unknown }, db: Database = getDb()): ListResponse<ChatSummary> {
+export function getChats(params: { limit?: unknown; offset?: unknown; kind?: unknown; jid?: unknown }, db: Database = getDb()): ListResponse<ChatSummary> {
   const limit = parseLimit(params.limit, 50, 200);
   const offset = parseOffset(params.offset);
   const kind = params.kind === 'direct' || params.kind === 'group' ? params.kind : undefined;
-  const where = kind ? 'WHERE chats.kind = @kind' : 'WHERE chats.kind IN (\'direct\', \'group\')';
-  const total = (db.prepare(`SELECT COUNT(*) AS count FROM chats ${where}`).get({ kind }) as CountRow).count;
+  const targetJid = typeof params.jid === 'string' && params.jid.trim() ? params.jid.trim() : undefined;
+
+  let where = kind ? 'WHERE chats.kind = @kind' : 'WHERE chats.kind IN (\'direct\', \'group\')';
+  if (targetJid) {
+    where = 'WHERE chats.jid = @targetJid';
+  }
+  const total = (db.prepare(`SELECT COUNT(*) AS count FROM chats ${where}`).get({ kind, targetJid }) as CountRow).count;
 
   const rows = db.prepare(`
     WITH chat_page AS (
@@ -234,7 +239,7 @@ export function getChats(params: { limit?: unknown; offset?: unknown; kind?: unk
     LEFT JOIN latest ON latest.chat_jid = chat_page.jid
     ${contactLeftJoins('chat_contacts', 'chat_page.jid')}
     ORDER BY COALESCE(message_stats.lastMessageTs, chat_page.last_message_at, 0) DESC, name COLLATE NOCASE ASC
-  `).all({ kind, limit, offset }) as ChatRow[];
+  `).all({ kind, limit, offset, targetJid }) as ChatRow[];
 
   return asPagination(rows.map((row) => ({
     jid: row.jid,
@@ -493,4 +498,27 @@ dataRouter.get('/media/file', (req, res, next) => {
 
 dataRouter.get('/search', (req, res) => {
   res.json(searchMessages(req.query));
+});
+
+dataRouter.get('/messages/:id/offset', (req, res) => {
+  const id = Number(req.params.id);
+  if (isNaN(id)) {
+    res.status(400).json({ error: 'Invalid message ID' });
+    return;
+  }
+  const db = getDb();
+  const msg = db.prepare('SELECT chat_jid, ts FROM messages WHERE rowid = ?').get(id) as { chat_jid: string; ts: number } | undefined;
+  if (!msg) {
+    res.status(404).json({ error: 'Message not found' });
+    return;
+  }
+  const countRow = db.prepare(`
+    SELECT COUNT(*) AS count
+    FROM messages
+    WHERE chat_jid = ? AND (ts > ? OR (ts = ? AND rowid > ?))
+  `).get(msg.chat_jid, msg.ts, msg.ts, id) as { count: number };
+  res.json({
+    chatJid: msg.chat_jid,
+    offset: countRow.count
+  });
 });

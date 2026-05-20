@@ -258,9 +258,11 @@ export const api = {
   wordCloud: (period: Period, limit = 40, filter: 'all' | 'useful' = 'all') =>
     request<WordCloudTerm[]>('/api/stats/word-cloud', { period, limit, filter }),
   people: (limit = 50, offset = 0) => request<ListResponse<PersonSummary>>('/api/people', { limit, offset }),
-  chats: (limit = 50, offset = 0, kind?: 'direct' | 'group') => request<ListResponse<ChatSummary>>('/api/chats', { limit, offset, kind }),
+  chats: (limit = 50, offset = 0, kind?: 'direct' | 'group', jid?: string) =>
+    request<ListResponse<ChatSummary>>('/api/chats', { limit, offset, kind, jid }),
   chatMessages: (jid: string, limit = 50, offset = 0) =>
     request<ListResponse<MessageSummary>>(`/api/chats/${encodeURIComponent(jid)}/messages`, { limit, offset }),
+  messageOffset: (id: number) => request<{ chatJid: string; offset: number }>(`/api/messages/${id}/offset`),
   media: (limit = 60, offset = 0, type?: string) => request<ListResponse<MediaItem>>('/api/media', { limit, offset, type }),
   search: (q: string, limit = 50, offset = 0) => request<ListResponse<SearchResult>>('/api/search', { q, limit, offset }),
 };
