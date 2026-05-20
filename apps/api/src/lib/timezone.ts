@@ -22,13 +22,28 @@ export function resolveStatsTimeZone(raw: unknown): string {
   }
 }
 
+const formattersCache = new Map<string, Intl.DateTimeFormat>();
+
+function getFormatter(timeZone: string): Intl.DateTimeFormat {
+  let formatter = formattersCache.get(timeZone);
+  if (!formatter) {
+    formatter = new Intl.DateTimeFormat('en-GB', {
+      timeZone,
+      hour: 'numeric',
+      hourCycle: 'h23',
+    });
+    formattersCache.set(timeZone, formatter);
+  }
+  return formatter;
+}
+
 /** Calendar hour 0–23 for Unix epoch seconds in the given IANA time zone. */
 export function hourInTimezone(epochSeconds: number, timeZone: string): number {
-  const parts = new Intl.DateTimeFormat('en-GB', {
-    timeZone,
-    hour: 'numeric',
-    hourCycle: 'h23',
-  }).formatToParts(new Date(epochSeconds * 1000));
+  if (timeZone === 'UTC') {
+    return new Date(epochSeconds * 1000).getUTCHours();
+  }
+  const formatter = getFormatter(timeZone);
+  const parts = formatter.formatToParts(new Date(epochSeconds * 1000));
   const value = Number(parts.find((p) => p.type === 'hour')?.value);
   if (!Number.isFinite(value)) return 0;
   return Math.min(23, Math.max(0, value));
