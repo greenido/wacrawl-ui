@@ -1,6 +1,6 @@
 {
   "name": "wacrawl-dashboard",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Local WhatsApp analytics dashboard powered by a WaCrawl SQLite archive",
   "keywords": [
     "whatsapp",
