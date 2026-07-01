@@ -17,14 +17,23 @@ import { hourInTimezone, resolveStatsTimeZone } from '../lib/timezone.js';
 import { USEFUL_WORD_STOP_SET } from '../lib/wordCloudUsefulStopWords.js';
 import type {
   ActivityHeatmapPoint,
+  ConversationDynamics,
+  ConversationDepthStat,
   DayOfWeekStat,
+  EmojiAnalytics,
+  EmojiContactStat,
+  EmojiStat,
+  GhostScoreStat,
   GroupActivityStat,
   HourOfDayStat,
+  InitiationRatioStat,
+  LateNightTexterStat,
   MediaBreakdownStat,
   MediaSenderStat,
   MessageStreaks,
   MessageVolumePoint,
   OverviewStats,
+  RelationshipTrajectoryStat,
   ResponseTimeStat,
   SentReceivedRatioPoint,
   TopContact,
@@ -487,6 +496,297 @@ export function getWordCloud(params: { period?: unknown; limit?: unknown; filter
     .slice(0, limit);
 }
 
+const EMOJI_REGEX = /[\p{Emoji_Presentation}\p{Extended_Pictographic}]/gu;
+
+interface EmojiMessageRow {
+  text: string | null;
+  from_me: number;
+  jid: string | null;
+  name: string | null;
+  contact_name: string | null;
+}
+
+export function getEmojiAnalytics(params: { period?: unknown; limit?: unknown }, db: Database = getDb()): EmojiAnalytics {
+  const since = sinceTimestamp(parsePeriod(params.period));
+  const limit = parseLimit(params.limit, 15, 50);
+
+  const rows = db.prepare(`
+    SELECT
+      messages.text,
+      messages.from_me,
+      CASE WHEN messages.from_me = 1 THEN messages.chat_jid ELSE COALESCE(messages.sender_jid, messages.chat_jid) END AS jid,
+      ${cleanDisplayNameSql(`CASE WHEN messages.from_me = 1 THEN COALESCE(chats.name, messages.chat_name) ELSE messages.sender_name END`)} AS name,
+      ${contactDisplayNameSql('contacts')} AS contact_name
+    FROM messages
+    LEFT JOIN chats ON chats.jid = CASE WHEN messages.from_me = 1 THEN messages.chat_jid ELSE COALESCE(messages.sender_jid, messages.chat_jid) END
+    ${contactLeftJoins('contacts', 'CASE WHEN messages.from_me = 1 THEN messages.chat_jid ELSE COALESCE(messages.sender_jid, messages.chat_jid) END')}
+    WHERE messages.ts >= @since AND messages.text IS NOT NULL AND messages.text <> ''
+    ORDER BY messages.ts DESC
+    LIMIT 50000
+  `).all({ since }) as EmojiMessageRow[];
+
+  const allCounts = new Map<string, number>();
+  const sentCounts = new Map<string, number>();
+  const receivedCounts = new Map<string, number>();
+  const userCounts = new Map<string, { name: string; count: number; emojis: Map<string, number> }>();
+  let totalEmojiCount = 0;
+
+  for (const row of rows) {
+    const emojis = (row.text ?? '').match(EMOJI_REGEX);
+    if (!emojis || emojis.length === 0) continue;
+
+    totalEmojiCount += emojis.length;
+    const jid = row.jid ?? 'unknown';
+    const displayName = row.name ?? row.contact_name ?? jid;
+
+    if (!userCounts.has(jid)) {
+      userCounts.set(jid, { name: displayName, count: 0, emojis: new Map() });
+    }
+    const userEntry = userCounts.get(jid)!;
+
+    for (const emoji of emojis) {
+      allCounts.set(emoji, (allCounts.get(emoji) ?? 0) + 1);
+
+      if (row.from_me) {
+        sentCounts.set(emoji, (sentCounts.get(emoji) ?? 0) + 1);
+      } else {
+        receivedCounts.set(emoji, (receivedCounts.get(emoji) ?? 0) + 1);
+      }
+
+      userEntry.count += 1;
+      userEntry.emojis.set(emoji, (userEntry.emojis.get(emoji) ?? 0) + 1);
+    }
+  }
+
+  const sortMap = (map: Map<string, number>, n: number): EmojiStat[] =>
+    [...map.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, n)
+      .map(([emoji, count]) => ({ emoji, count }));
+
+  const topEmojiUsers: EmojiContactStat[] = [...userCounts.entries()]
+    .sort((a, b) => b[1].count - a[1].count)
+    .slice(0, limit)
+    .map(([jid, entry]) => {
+      const topEmoji = [...entry.emojis.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? '';
+      return { jid, name: entry.name, count: entry.count, topEmoji };
+    });
+
+  return {
+    topEmojis: sortMap(allCounts, limit),
+    topSentEmojis: sortMap(sentCounts, limit),
+    topReceivedEmojis: sortMap(receivedCounts, limit),
+    totalEmojiCount,
+    uniqueEmojiCount: allCounts.size,
+    topEmojiUsers,
+  };
+}
+
+const SESSION_GAP_SECONDS = 4 * 3600;
+const GHOST_WINDOW_SECONDS = 24 * 3600;
+
+interface ChatMessageRow {
+  chat_jid: string;
+  ts: number;
+  from_me: number;
+}
+
+interface NameRow {
+  jid: string;
+  name: string | null;
+}
+
+function resolveChatNames(jids: string[], db: Database): Map<string, string> {
+  const map = new Map<string, string>();
+  if (jids.length === 0) return map;
+  const stmt = db.prepare(`
+    SELECT
+      c.jid,
+      COALESCE(
+        ${cleanDisplayNameSql('c.name')},
+        ${contactDisplayNameSql('chat_contacts')},
+        ${cleanDisplayNameSql('c.jid')},
+        'Unknown'
+      ) AS name
+    FROM chats c
+    ${contactLeftJoins('chat_contacts', 'c.jid')}
+    WHERE c.jid = @jid
+  `);
+  for (const jid of jids) {
+    const row = stmt.get({ jid }) as NameRow | undefined;
+    map.set(jid, row?.name ?? jid);
+  }
+  return map;
+}
+
+function computeTrajectoryDirection(trend: Array<{ count: number }>): 'growing' | 'fading' | 'stable' {
+  if (trend.length < 4) return 'stable';
+  const half = Math.floor(trend.length / 2);
+  const firstHalfAvg = trend.slice(0, half).reduce((s, p) => s + p.count, 0) / half;
+  const secondHalfAvg = trend.slice(half).reduce((s, p) => s + p.count, 0) / (trend.length - half);
+  const ratio = secondHalfAvg / (firstHalfAvg || 1);
+  if (ratio > 1.25) return 'growing';
+  if (ratio < 0.75) return 'fading';
+  return 'stable';
+}
+
+export function getConversationDynamics(
+  params: { period?: unknown; limit?: unknown; timeZone?: unknown },
+  db: Database = getDb(),
+): ConversationDynamics {
+  const since = sinceTimestamp(parsePeriod(params.period));
+  const limit = parseLimit(params.limit, 10, 50);
+  const timeZone = resolveStatsTimeZone(params.timeZone);
+
+  const rows = db.prepare(`
+    SELECT m.chat_jid, m.ts, m.from_me
+    FROM messages m
+    WHERE m.ts >= @since
+    ORDER BY m.chat_jid, m.ts, m.rowid
+  `).all({ since }) as ChatMessageRow[];
+
+  const chatGroups = new Map<string, ChatMessageRow[]>();
+  for (const row of rows) {
+    let group = chatGroups.get(row.chat_jid);
+    if (!group) {
+      group = [];
+      chatGroups.set(row.chat_jid, group);
+    }
+    group.push(row);
+  }
+
+  const rawInitiation: Array<{ jid: string; byMe: number; byThem: number; total: number }> = [];
+  const rawDepth: Array<{ jid: string; avgDepth: number; sessions: number; total: number }> = [];
+  const rawGhost: Array<{ jid: string; ghosted: number; totalSent: number }> = [];
+  const rawLateNight: Array<{ jid: string; lateNight: number; workHours: number; other: number; total: number }> = [];
+  const rawTrajectory: Array<{ jid: string; monthCounts: Map<string, number>; total: number }> = [];
+
+  for (const [jid, messages] of chatGroups) {
+    if (messages.length < 2) continue;
+
+    let byMe = 0;
+    let byThem = 0;
+    let sessionStart = 0;
+    const sessionSizes: number[] = [];
+
+    if (messages[0].from_me) byMe++;
+    else byThem++;
+
+    for (let i = 1; i < messages.length; i++) {
+      if (messages[i].ts - messages[i - 1].ts >= SESSION_GAP_SECONDS) {
+        sessionSizes.push(i - sessionStart);
+        sessionStart = i;
+        if (messages[i].from_me) byMe++;
+        else byThem++;
+      }
+    }
+    sessionSizes.push(messages.length - sessionStart);
+
+    const totalSessions = sessionSizes.length;
+    rawInitiation.push({ jid, byMe, byThem, total: byMe + byThem });
+    rawDepth.push({ jid, avgDepth: Math.round((messages.length / totalSessions) * 10) / 10, sessions: totalSessions, total: messages.length });
+
+    let ghosted = 0;
+    let totalSent = 0;
+    for (let i = 0; i < messages.length; i++) {
+      if (!messages[i].from_me) continue;
+      totalSent++;
+      let replied = false;
+      for (let j = i + 1; j < messages.length; j++) {
+        if (!messages[j].from_me) {
+          replied = messages[j].ts - messages[i].ts <= GHOST_WINDOW_SECONDS;
+          break;
+        }
+      }
+      if (!replied) ghosted++;
+    }
+    if (totalSent > 0) {
+      rawGhost.push({ jid, ghosted, totalSent });
+    }
+
+    let lateNight = 0;
+    let workHrs = 0;
+    let other = 0;
+    for (const msg of messages) {
+      const hour = hourInTimezone(msg.ts, timeZone);
+      if (hour < 5) lateNight++;
+      else if (hour >= 9 && hour < 17) workHrs++;
+      else other++;
+    }
+    rawLateNight.push({ jid, lateNight, workHours: workHrs, other, total: messages.length });
+
+    const monthCounts = new Map<string, number>();
+    for (const msg of messages) {
+      const d = new Date(msg.ts * 1000);
+      const month = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
+      monthCounts.set(month, (monthCounts.get(month) ?? 0) + 1);
+    }
+    rawTrajectory.push({ jid, monthCounts, total: messages.length });
+  }
+
+  const topInitiation = rawInitiation.filter((r) => r.total >= 3).sort((a, b) => b.total - a.total).slice(0, limit);
+  const topDepth = rawDepth.filter((r) => r.sessions >= 3).sort((a, b) => b.avgDepth - a.avgDepth).slice(0, limit);
+  const topGhost = rawGhost.filter((r) => r.totalSent >= 3).sort((a, b) => (b.ghosted / b.totalSent) - (a.ghosted / a.totalSent)).slice(0, limit);
+  const topLateNight = rawLateNight.filter((r) => r.lateNight > 0).sort((a, b) => b.lateNight - a.lateNight).slice(0, limit);
+  const topTrajectory = rawTrajectory.filter((r) => r.monthCounts.size >= 2).sort((a, b) => b.total - a.total).slice(0, limit);
+
+  const allJids = new Set<string>();
+  for (const r of topInitiation) allJids.add(r.jid);
+  for (const r of topDepth) allJids.add(r.jid);
+  for (const r of topGhost) allJids.add(r.jid);
+  for (const r of topLateNight) allJids.add(r.jid);
+  for (const r of topTrajectory) allJids.add(r.jid);
+
+  const names = resolveChatNames([...allJids], db);
+  const name = (jid: string) => names.get(jid) ?? jid;
+
+  const initiationRatio: InitiationRatioStat[] = topInitiation.map((r) => ({
+    jid: r.jid,
+    name: name(r.jid),
+    initiatedByMe: r.byMe,
+    initiatedByThem: r.byThem,
+    ratio: Math.round((r.byMe / r.total) * 100) / 100,
+  }));
+
+  const conversationDepth: ConversationDepthStat[] = topDepth.map((r) => ({
+    jid: r.jid,
+    name: name(r.jid),
+    avgMessagesPerSession: r.avgDepth,
+    totalSessions: r.sessions,
+  }));
+
+  const ghostScore: GhostScoreStat[] = topGhost.map((r) => ({
+    jid: r.jid,
+    name: name(r.jid),
+    ghostedCount: r.ghosted,
+    totalSent: r.totalSent,
+    ghostRate: Math.round((r.ghosted / r.totalSent) * 100) / 100,
+  }));
+
+  const lateNightTexters: LateNightTexterStat[] = topLateNight.map((r) => ({
+    jid: r.jid,
+    name: name(r.jid),
+    lateNight: r.lateNight,
+    workHours: r.workHours,
+    otherHours: r.other,
+    totalMessages: r.total,
+    lateNightPct: Math.round((r.lateNight / r.total) * 100),
+  }));
+
+  const relationshipTrajectory: RelationshipTrajectoryStat[] = topTrajectory.map((r) => {
+    const sorted = [...r.monthCounts.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+    const trend = sorted.map(([month, count]) => ({ month, count }));
+    return {
+      jid: r.jid,
+      name: name(r.jid),
+      trend,
+      direction: computeTrajectoryDirection(trend),
+    };
+  });
+
+  return { initiationRatio, conversationDepth, ghostScore, relationshipTrajectory, lateNightTexters };
+}
+
 export const statsRouter = Router();
 
 statsRouter.get('/overview', (_req, res) => {
@@ -539,4 +839,12 @@ statsRouter.get('/streaks', (req, res) => {
 
 statsRouter.get('/word-cloud', (req, res) => {
   res.json(getWordCloud(req.query));
+});
+
+statsRouter.get('/emoji-analytics', (req, res) => {
+  res.json(getEmojiAnalytics(req.query));
+});
+
+statsRouter.get('/conversation-dynamics', (req, res) => {
+  res.json(getConversationDynamics(req.query));
 });

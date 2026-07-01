@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { sinceTimestamp, unixSecondsToIso } from '../lib/query.js';
 import {
   getActivityHeatmap,
+  getConversationDynamics,
   getDayOfWeekStats,
   getGroupActivity,
   getHourOfDayStats,
@@ -184,6 +185,47 @@ describe('stats queries', () => {
     expect(usefulWords.some((text) => text === 'hey')).toBe(false);
     expect(usefulWords.some((text) => text === 'the')).toBe(false);
     expect(getWordCloud({ period: 'all', limit: '3' }, db)[0]).toMatchObject({ text: 'family', value: 2 });
+  });
+});
+
+describe('conversation dynamics', () => {
+  it('computes initiation ratio, depth, ghost score, trajectory, and late-night stats', () => {
+    db = createTestDb();
+    const insert = db.prepare(`
+      INSERT INTO messages (
+        source_pk, chat_jid, chat_name, msg_id, sender_jid, sender_name, ts,
+        from_me, text, raw_type, message_type, media_type, media_path, media_size
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    const base = 1_700_000_000;
+    // Session 1: starts at base (me), reply 30min later, reply 1h later
+    insert.run(100, 'alice@s.whatsapp.net', 'Alice', 's1m1', null, null, base + 100, 1, 'start s1', 0, 'text', null, null, null);
+    insert.run(101, 'alice@s.whatsapp.net', 'Alice', 's1m2', 'alice@s.whatsapp.net', 'Alice', base + 1800, 0, 'reply s1', 0, 'text', null, null, null);
+    insert.run(102, 'alice@s.whatsapp.net', 'Alice', 's1m3', null, null, base + 3600, 1, 'followup s1', 0, 'text', null, null, null);
+    // Session 2: gap >4h, starts with them
+    insert.run(103, 'alice@s.whatsapp.net', 'Alice', 's2m1', 'alice@s.whatsapp.net', 'Alice', base + 20000, 0, 'start s2', 0, 'text', null, null, null);
+    insert.run(104, 'alice@s.whatsapp.net', 'Alice', 's2m2', null, null, base + 21000, 1, 'reply s2', 0, 'text', null, null, null);
+    // Session 3: another gap, me starts, no reply (ghost)
+    insert.run(105, 'alice@s.whatsapp.net', 'Alice', 's3m1', null, null, base + 40000, 1, 'hello?', 0, 'text', null, null, null);
+    // Session 4 (month 2): me starts, reply quick
+    insert.run(106, 'alice@s.whatsapp.net', 'Alice', 's4m1', null, null, base + 2_700_000, 1, 'month2', 0, 'text', null, null, null);
+    insert.run(107, 'alice@s.whatsapp.net', 'Alice', 's4m2', 'alice@s.whatsapp.net', 'Alice', base + 2_701_000, 0, 'month2 reply', 0, 'text', null, null, null);
+
+    const dynamics = getConversationDynamics({ period: 'all', limit: '10' }, db);
+
+    const alice = dynamics.initiationRatio.find((r) => r.jid === 'alice@s.whatsapp.net');
+    expect(alice).toBeDefined();
+    // Sessions (messages sorted by ts, >4h gap = new session):
+    // S1 [m1, s1m1, s1m2, s1m3] me | S2 [s2m1, s2m2] them | S3 [s3m1] me
+    // S4 [m2] them | S5 [m6] me | S6 [s4m1, s4m2] me
+    expect(alice!.initiatedByMe).toBe(4);
+    expect(alice!.initiatedByThem).toBe(2);
+
+    expect(dynamics.conversationDepth.length).toBeGreaterThan(0);
+    expect(dynamics.ghostScore.length).toBeGreaterThan(0);
+    expect(dynamics.relationshipTrajectory.length).toBeGreaterThan(0);
+    expect(dynamics.lateNightTexters.length).toBeGreaterThanOrEqual(0);
   });
 });
 
