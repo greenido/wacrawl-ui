@@ -24,7 +24,15 @@ WACRAWL_DB=/path/to/wacrawl.db npx wacrawl-dashboard@latest
 - **Overview cards** — total messages, chats, contacts, media files, and archive date span; each card can jump to Search, Chats, People, or Media as a shortcut.
 - **Time window** — period filter in the top bar (**Day / Week / Month / Year / All**) drives chart stats (default **Year**). The **activity heatmap** uses the current calendar year.
 - **Charts and lists** — message volume over time, top contacts (bar chart; click a contact to open **Chats** filtered to that JID), hour-of-day and day-of-week activity, monthly sent vs received vs ratio, media type breakdown (count and bytes), top media senders, response-time averages, busiest groups, messaging streaks (current and longest).
-- **Word cloud** — top terms with an **All words** vs **Useful words** (stopword-filtered) toggle.
+- **Word cloud** — top terms with an **All words** vs **Useful words** (stopword-filtered) toggle; click any term to search your archive for it.
+- **Emoji analytics** — total and unique emoji counts, top emojis by **All / Sent / Received**, and a leaderboard of top emoji users with their favourite emoji.
+- **Conversation dynamics** — a dedicated section with relationship-level insights:
+  - **Who starts conversations** — initiation ratio per contact with a visual split bar (sessions separated by 4h+ gaps).
+  - **Conversation depth** — average messages per session, showing which chats go deep.
+  - **Ghost score** — percentage of your messages that went unanswered within 24 hours, colour-coded by severity.
+  - **Late-night texters** — who you talk to between midnight and 5 am, with hour-bucket breakdowns.
+  - **Relationship trajectory** — monthly sparkline per contact showing whether message frequency is *growing*, *fading*, or *stable*.
+- **Loading overlay** — an animated full-screen splash with rotating quotes while the dashboard fetches data.
 
 ### People
 
@@ -36,10 +44,17 @@ WACRAWL_DB=/path/to/wacrawl.db npx wacrawl-dashboard@latest
 - **Read-only inspection** — message bubbles, timestamps, optional **copy message** (including media-aware clipboard text), and inline **images / videos / audio** when paths resolve under your configured media root.
 - **Deep links** — `?contact=<jid>` (for example from the dashboard top-contacts chart) selects the matching chat when present.
 
-### Media
+### Media & Links
 
-- **Paged grid** of indexed media with **infinite scroll** (intersection-based loading).
-- Thumbnails for **images** and **videos**, affordances for **audio**, and a full-screen **lightbox** for preview and playback where the type supports it.
+- **Two-tab layout** — switch between **Media Grid** and **Link Intelligence** from the page header.
+- **Media Grid** — paged grid of indexed media with **infinite scroll** (intersection-based loading). Thumbnails for **images** and **videos**, affordances for **audio**, and a full-screen **lightbox** for preview and playback where the type supports it.
+- **Link Intelligence** (new) — a rich analytics panel for URLs shared in your conversations:
+  - **Overview pills** — total links shared and unique domains at a glance.
+  - **Domain leaderboard** — horizontal bar chart of the most-shared domains, colour-coded by category.
+  - **Content categories** — pie chart breaking links into *Video, Social, News, Shopping, Music, Developer, Reference,* and *Other*, with the top domain per category.
+  - **Media timeline density** — stacked area chart showing daily counts of images, videos, audio files, and links over time.
+  - **Sharing asymmetry** — per-contact breakdown of media and link volume in each direction (sent vs received).
+  - **First shared** — a timeline of the earliest message and earliest media item for each conversation.
 
 ### Search
 
@@ -62,6 +77,7 @@ WACRAWL_DB=/path/to/wacrawl.db npx wacrawl-dashboard@latest
 
 - Listens on **`127.0.0.1`** with host and CORS restricted to local dev/preview origins.
 - Opens the WaCrawl SQLite database in **readonly** mode where applicable; `/api/health` reports DB readability and resolved paths.
+- **Stats endpoints** — `/api/stats/emoji-analytics`, `/api/stats/conversation-dynamics`, and `/api/stats/link-intelligence` power the new dashboard and media analytics panels.
 
 ## Requirements
 
