@@ -151,6 +151,130 @@ export interface WordCloudTerm {
   value: number;
 }
 
+export interface EmojiStat {
+  emoji: string;
+  count: number;
+}
+
+export interface EmojiContactStat {
+  name: string;
+  jid: string;
+  count: number;
+  topEmoji: string;
+}
+
+export interface EmojiAnalytics {
+  topEmojis: EmojiStat[];
+  topSentEmojis: EmojiStat[];
+  topReceivedEmojis: EmojiStat[];
+  totalEmojiCount: number;
+  uniqueEmojiCount: number;
+  topEmojiUsers: EmojiContactStat[];
+}
+
+export interface InitiationRatioStat {
+  jid: string;
+  name: string;
+  initiatedByMe: number;
+  initiatedByThem: number;
+  ratio: number;
+}
+
+export interface ConversationDepthStat {
+  jid: string;
+  name: string;
+  avgMessagesPerSession: number;
+  totalSessions: number;
+}
+
+export interface GhostScoreStat {
+  jid: string;
+  name: string;
+  ghostedCount: number;
+  totalSent: number;
+  ghostRate: number;
+}
+
+export interface RelationshipTrajectoryPoint {
+  month: string;
+  count: number;
+}
+
+export interface RelationshipTrajectoryStat {
+  jid: string;
+  name: string;
+  trend: RelationshipTrajectoryPoint[];
+  direction: 'growing' | 'fading' | 'stable';
+}
+
+export interface LateNightTexterStat {
+  jid: string;
+  name: string;
+  lateNight: number;
+  workHours: number;
+  otherHours: number;
+  totalMessages: number;
+  lateNightPct: number;
+}
+
+export interface ConversationDynamics {
+  initiationRatio: InitiationRatioStat[];
+  conversationDepth: ConversationDepthStat[];
+  ghostScore: GhostScoreStat[];
+  relationshipTrajectory: RelationshipTrajectoryStat[];
+  lateNightTexters: LateNightTexterStat[];
+}
+
+export type LinkCategory = 'video' | 'social' | 'news' | 'shopping' | 'music' | 'dev' | 'reference' | 'other';
+
+export interface LinkDomainStat {
+  domain: string;
+  count: number;
+  category: LinkCategory;
+}
+
+export interface MediaTimelinePoint {
+  date: string;
+  images: number;
+  videos: number;
+  audio: number;
+  links: number;
+}
+
+export interface SharingAsymmetryStat {
+  jid: string;
+  name: string;
+  mediaSent: number;
+  mediaReceived: number;
+  linksSent: number;
+  linksReceived: number;
+}
+
+export interface LinkCategoryStat {
+  category: LinkCategory;
+  count: number;
+  topDomain: string;
+}
+
+export interface FirstSharedStat {
+  jid: string;
+  name: string;
+  firstMessageText: string | null;
+  firstMessageDate: string;
+  firstMediaType: string | null;
+  firstMediaDate: string | null;
+}
+
+export interface LinkIntelligence {
+  domainLeaderboard: LinkDomainStat[];
+  mediaTimeline: MediaTimelinePoint[];
+  sharingAsymmetry: SharingAsymmetryStat[];
+  linkCategories: LinkCategoryStat[];
+  firstShared: FirstSharedStat[];
+  totalLinks: number;
+  uniqueDomains: number;
+}
+
 export class ApiClientError extends Error {
   constructor(message: string, public status?: number) {
     super(message);
@@ -257,6 +381,12 @@ export const api = {
   streaks: (period: Period) => request<MessageStreaks>('/api/stats/streaks', { period }),
   wordCloud: (period: Period, limit = 40, filter: 'all' | 'useful' = 'all') =>
     request<WordCloudTerm[]>('/api/stats/word-cloud', { period, limit, filter }),
+  emojiAnalytics: (period: Period, limit = 15) =>
+    request<EmojiAnalytics>('/api/stats/emoji-analytics', { period, limit }),
+  conversationDynamics: (period: Period, limit = 10, timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone) =>
+    request<ConversationDynamics>('/api/stats/conversation-dynamics', { period, limit, timeZone }),
+  linkIntelligence: (period: Period, limit = 15) =>
+    request<LinkIntelligence>('/api/stats/link-intelligence', { period, limit }),
   people: (limit = 50, offset = 0) => request<ListResponse<PersonSummary>>('/api/people', { limit, offset }),
   chats: (limit = 50, offset = 0, kind?: 'direct' | 'group', jid?: string) =>
     request<ListResponse<ChatSummary>>('/api/chats', { limit, offset, kind, jid }),

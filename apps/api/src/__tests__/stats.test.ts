@@ -3,9 +3,11 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { sinceTimestamp, unixSecondsToIso } from '../lib/query.js';
 import {
   getActivityHeatmap,
+  getConversationDynamics,
   getDayOfWeekStats,
   getGroupActivity,
   getHourOfDayStats,
+  getLinkIntelligence,
   getMediaBreakdown,
   getMediaSenders,
   getMessageStreaks,
@@ -184,6 +186,103 @@ describe('stats queries', () => {
     expect(usefulWords.some((text) => text === 'hey')).toBe(false);
     expect(usefulWords.some((text) => text === 'the')).toBe(false);
     expect(getWordCloud({ period: 'all', limit: '3' }, db)[0]).toMatchObject({ text: 'family', value: 2 });
+  });
+});
+
+describe('conversation dynamics', () => {
+  it('computes initiation ratio, depth, ghost score, trajectory, and late-night stats', () => {
+    db = createTestDb();
+    const insert = db.prepare(`
+      INSERT INTO messages (
+        source_pk, chat_jid, chat_name, msg_id, sender_jid, sender_name, ts,
+        from_me, text, raw_type, message_type, media_type, media_path, media_size
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    const base = 1_700_000_000;
+    // Session 1: starts at base (me), reply 30min later, reply 1h later
+    insert.run(100, 'alice@s.whatsapp.net', 'Alice', 's1m1', null, null, base + 100, 1, 'start s1', 0, 'text', null, null, null);
+    insert.run(101, 'alice@s.whatsapp.net', 'Alice', 's1m2', 'alice@s.whatsapp.net', 'Alice', base + 1800, 0, 'reply s1', 0, 'text', null, null, null);
+    insert.run(102, 'alice@s.whatsapp.net', 'Alice', 's1m3', null, null, base + 3600, 1, 'followup s1', 0, 'text', null, null, null);
+    // Session 2: gap >4h, starts with them
+    insert.run(103, 'alice@s.whatsapp.net', 'Alice', 's2m1', 'alice@s.whatsapp.net', 'Alice', base + 20000, 0, 'start s2', 0, 'text', null, null, null);
+    insert.run(104, 'alice@s.whatsapp.net', 'Alice', 's2m2', null, null, base + 21000, 1, 'reply s2', 0, 'text', null, null, null);
+    // Session 3: another gap, me starts, no reply (ghost)
+    insert.run(105, 'alice@s.whatsapp.net', 'Alice', 's3m1', null, null, base + 40000, 1, 'hello?', 0, 'text', null, null, null);
+    // Session 4 (month 2): me starts, reply quick
+    insert.run(106, 'alice@s.whatsapp.net', 'Alice', 's4m1', null, null, base + 2_700_000, 1, 'month2', 0, 'text', null, null, null);
+    insert.run(107, 'alice@s.whatsapp.net', 'Alice', 's4m2', 'alice@s.whatsapp.net', 'Alice', base + 2_701_000, 0, 'month2 reply', 0, 'text', null, null, null);
+
+    const dynamics = getConversationDynamics({ period: 'all', limit: '10' }, db);
+
+    const alice = dynamics.initiationRatio.find((r) => r.jid === 'alice@s.whatsapp.net');
+    expect(alice).toBeDefined();
+    // Sessions (messages sorted by ts, >4h gap = new session):
+    // S1 [m1, s1m1, s1m2, s1m3] me | S2 [s2m1, s2m2] them | S3 [s3m1] me
+    // S4 [m2] them | S5 [m6] me | S6 [s4m1, s4m2] me
+    expect(alice!.initiatedByMe).toBe(4);
+    expect(alice!.initiatedByThem).toBe(2);
+
+    expect(dynamics.conversationDepth.length).toBeGreaterThan(0);
+    expect(dynamics.ghostScore.length).toBeGreaterThan(0);
+    expect(dynamics.relationshipTrajectory.length).toBeGreaterThan(0);
+    expect(dynamics.lateNightTexters.length).toBeGreaterThanOrEqual(0);
+  });
+});
+
+describe('link intelligence', () => {
+  it('extracts domains, categories, timeline, asymmetry, and first-shared from messages', () => {
+    db = createTestDb();
+    const insert = db.prepare(`
+      INSERT INTO messages (
+        source_pk, chat_jid, chat_name, msg_id, sender_jid, sender_name, ts,
+        from_me, text, raw_type, message_type, media_type, media_path, media_size
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    insert.run(20, 'alice@s.whatsapp.net', 'Alice', 'l1', null, null, 1_700_000_100, 1, 'check this https://youtube.com/watch?v=abc', 0, 'text', null, null, null);
+    insert.run(21, 'alice@s.whatsapp.net', 'Alice', 'l2', 'alice@s.whatsapp.net', 'Alice', 1_700_086_500, 0, 'look https://reddit.com/r/test and https://youtube.com/watch?v=xyz', 0, 'text', null, null, null);
+    insert.run(22, 'family@g.us', 'Family', 'l3', 'bob@s.whatsapp.net', 'Bob', 1_700_172_900, 0, 'news https://cnn.com/article/123', 0, 'text', null, null, null);
+    insert.run(23, 'alice@s.whatsapp.net', 'Alice', 'l4', null, null, 1_700_259_300, 1, 'https://github.com/repo and https://amazon.com/product', 0, 'text', null, null, null);
+
+    const result = getLinkIntelligence({ period: 'all', limit: '10' }, db);
+
+    expect(result.totalLinks).toBe(6);
+    expect(result.uniqueDomains).toBe(5);
+
+    expect(result.domainLeaderboard[0]).toMatchObject({ domain: 'youtube.com', count: 2, category: 'video' });
+    expect(result.domainLeaderboard.find((d) => d.domain === 'reddit.com')).toMatchObject({ category: 'social' });
+    expect(result.domainLeaderboard.find((d) => d.domain === 'cnn.com')).toMatchObject({ category: 'news' });
+    expect(result.domainLeaderboard.find((d) => d.domain === 'github.com')).toMatchObject({ category: 'dev' });
+    expect(result.domainLeaderboard.find((d) => d.domain === 'amazon.com')).toMatchObject({ category: 'shopping' });
+
+    expect(result.linkCategories.length).toBeGreaterThan(0);
+    const videoCategory = result.linkCategories.find((c) => c.category === 'video');
+    expect(videoCategory).toMatchObject({ count: 2, topDomain: 'youtube.com' });
+
+    expect(result.mediaTimeline.length).toBeGreaterThan(0);
+
+    const aliceAsymmetry = result.sharingAsymmetry.find((s) => s.jid === 'alice@s.whatsapp.net');
+    expect(aliceAsymmetry).toBeDefined();
+    expect(aliceAsymmetry!.linksSent).toBeGreaterThanOrEqual(3);
+    expect(aliceAsymmetry!.linksReceived).toBeGreaterThanOrEqual(2);
+
+    expect(result.firstShared.length).toBeGreaterThan(0);
+    const aliceFirst = result.firstShared.find((f) => f.jid === 'alice@s.whatsapp.net');
+    expect(aliceFirst).toBeDefined();
+    expect(aliceFirst!.firstMessageText).toBe('hello project update');
+  });
+
+  it('returns empty results when no links exist', () => {
+    db = createTestDb();
+    db.exec("UPDATE messages SET text = 'plain text no urls'");
+    const result = getLinkIntelligence({ period: 'all' }, db);
+
+    expect(result.totalLinks).toBe(0);
+    expect(result.uniqueDomains).toBe(0);
+    expect(result.domainLeaderboard).toEqual([]);
+    expect(result.linkCategories).toEqual([]);
   });
 });
 
