@@ -39,7 +39,12 @@
     "test": "npm run test -w @wacrawl/api",
     "preview": "npm run preview -w @wacrawl/web",
     "typecheck": "npm run typecheck -w @wacrawl/api && npm run typecheck -w @wacrawl/web",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm run build",
+    "publish:verify-auth": "npm whoami",
+    "publish:npm": "npm run publish:verify-auth && npm publish --access public"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "dependencies": {
     "better-sqlite3": "^12.4.6",

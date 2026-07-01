@@ -56,7 +56,7 @@ If output is wrong, fix package metadata before publishing.
 Run from repository root:
 
 ```bash
-npm publish --access public
+npm run publish:npm
 ```
 
 Notes:
@@ -111,6 +111,10 @@ Then configure secrets:
 
 ## Common issues and fixes
 
+- `npm ERR! 404` on publish (even though the package exists):
+  - Usually means your npm login/token is expired or missing, not that the package name is wrong.
+  - Run `npm whoami`; if it fails with `401 Unauthorized`, run `npm login` again (or set a fresh `NPM_TOKEN` / `~/.npmrc` auth token).
+  - After re-auth, retry with `npm run publish:npm` (runs `npm whoami` first so you get a clear auth error).
 - `npm ERR! 403` (forbidden):
   - You are not owner/collaborator on package, or token lacks permissions.
 - Missing built assets after install:
@@ -119,6 +123,8 @@ Then configure secrets:
   - Check `package.json` version and git tags before publishing.
 - Workflow builds but does not publish:
   - Ensure `npm publish` step is present and `NPM_TOKEN` secret exists.
+- `Automatic provenance generation not supported for provider: null`:
+  - Provenance only works in CI (GitHub Actions). Do not set `publishConfig.provenance`; use `npm publish --provenance` in the workflow instead.
 
 ## Quick command checklist
 
@@ -129,6 +135,6 @@ npm run typecheck
 npm run build
 npm version patch
 npm pack --dry-run
-npm publish --access public
+npm run publish:npm
 npx wacrawl-dashboard@latest
 ```
