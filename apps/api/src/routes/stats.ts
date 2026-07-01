@@ -15,6 +15,7 @@ import {
 } from '../lib/query.js';
 import { hourInTimezone, resolveStatsTimeZone } from '../lib/timezone.js';
 import { USEFUL_WORD_STOP_SET } from '../lib/wordCloudUsefulStopWords.js';
+import { categorizeDomain, extractUrls, parseDomain } from '../lib/urlExtract.js';
 import type {
   ActivityHeatmapPoint,
   ConversationDynamics,
@@ -23,19 +24,25 @@ import type {
   EmojiAnalytics,
   EmojiContactStat,
   EmojiStat,
+  FirstSharedStat,
   GhostScoreStat,
   GroupActivityStat,
   HourOfDayStat,
   InitiationRatioStat,
   LateNightTexterStat,
+  LinkCategoryStat,
+  LinkDomainStat,
+  LinkIntelligence,
   MediaBreakdownStat,
   MediaSenderStat,
+  MediaTimelinePoint,
   MessageStreaks,
   MessageVolumePoint,
   OverviewStats,
   RelationshipTrajectoryStat,
   ResponseTimeStat,
   SentReceivedRatioPoint,
+  SharingAsymmetryStat,
   TopContact,
   WordCloudTerm,
 } from '../types.js';
@@ -787,6 +794,216 @@ export function getConversationDynamics(
   return { initiationRatio, conversationDepth, ghostScore, relationshipTrajectory, lateNightTexters };
 }
 
+interface LinkMessageRow {
+  text: string | null;
+  ts: number;
+  from_me: number;
+  jid: string | null;
+  name: string | null;
+  contact_name: string | null;
+  media_type: string | null;
+}
+
+interface FirstSharedRow {
+  chat_jid: string;
+  chat_name: string | null;
+  contact_name: string | null;
+  first_text: string | null;
+  first_ts: number;
+  first_media_type: string | null;
+  first_media_ts: number | null;
+}
+
+export function getLinkIntelligence(
+  params: { period?: unknown; limit?: unknown },
+  db: Database = getDb(),
+): LinkIntelligence {
+  const since = sinceTimestamp(parsePeriod(params.period));
+  const limit = parseLimit(params.limit, 15, 50);
+
+  const rows = db.prepare(`
+    SELECT
+      messages.text,
+      messages.ts,
+      messages.from_me,
+      messages.media_type,
+      CASE WHEN messages.from_me = 1 THEN messages.chat_jid ELSE COALESCE(messages.sender_jid, messages.chat_jid) END AS jid,
+      ${cleanDisplayNameSql(`CASE WHEN messages.from_me = 1 THEN COALESCE(chats.name, messages.chat_name) ELSE messages.sender_name END`)} AS name,
+      ${contactDisplayNameSql('contacts')} AS contact_name
+    FROM messages
+    LEFT JOIN chats ON chats.jid = CASE WHEN messages.from_me = 1 THEN messages.chat_jid ELSE COALESCE(messages.sender_jid, messages.chat_jid) END
+    ${contactLeftJoins('contacts', 'CASE WHEN messages.from_me = 1 THEN messages.chat_jid ELSE COALESCE(messages.sender_jid, messages.chat_jid) END')}
+    WHERE messages.ts >= @since
+    ORDER BY messages.ts ASC
+  `).all({ since }) as LinkMessageRow[];
+
+  // --- Domain leaderboard + categories ---
+  const domainCounts = new Map<string, number>();
+  const linksByDate = new Map<string, number>();
+  const contactLinks = new Map<string, { name: string; sent: number; received: number }>();
+  let totalLinks = 0;
+
+  for (const row of rows) {
+    const urls = extractUrls(row.text);
+    if (urls.length === 0) continue;
+
+    totalLinks += urls.length;
+    const date = new Date(row.ts * 1000).toISOString().slice(0, 10);
+    linksByDate.set(date, (linksByDate.get(date) ?? 0) + urls.length);
+
+    const jid = row.jid ?? 'unknown';
+    const displayName = row.name ?? row.contact_name ?? jid;
+    if (!contactLinks.has(jid)) {
+      contactLinks.set(jid, { name: displayName, sent: 0, received: 0 });
+    }
+    const entry = contactLinks.get(jid)!;
+    if (row.from_me) {
+      entry.sent += urls.length;
+    } else {
+      entry.received += urls.length;
+    }
+
+    for (const url of urls) {
+      const domain = parseDomain(url);
+      if (domain) {
+        domainCounts.set(domain, (domainCounts.get(domain) ?? 0) + 1);
+      }
+    }
+  }
+
+  const domainLeaderboard: LinkDomainStat[] = [...domainCounts.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, limit)
+    .map(([domain, count]) => ({ domain, count, category: categorizeDomain(domain) }));
+
+  const uniqueDomains = domainCounts.size;
+
+  // --- Link categories ---
+  const catCounts = new Map<string, { count: number; domains: Map<string, number> }>();
+  for (const [domain, count] of domainCounts) {
+    const cat = categorizeDomain(domain);
+    if (!catCounts.has(cat)) {
+      catCounts.set(cat, { count: 0, domains: new Map() });
+    }
+    const catEntry = catCounts.get(cat)!;
+    catEntry.count += count;
+    catEntry.domains.set(domain, (catEntry.domains.get(domain) ?? 0) + count);
+  }
+
+  const linkCategories: LinkCategoryStat[] = [...catCounts.entries()]
+    .sort((a, b) => b[1].count - a[1].count)
+    .map(([category, { count, domains }]) => {
+      const topDomain = [...domains.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? '';
+      return { category: category as LinkCategoryStat['category'], count, topDomain };
+    });
+
+  // --- Media timeline density ---
+  const timelineBuckets = new Map<string, { images: number; videos: number; audio: number; links: number }>();
+  for (const row of rows) {
+    const date = new Date(row.ts * 1000).toISOString().slice(0, 10);
+    if (!timelineBuckets.has(date)) {
+      timelineBuckets.set(date, { images: 0, videos: 0, audio: 0, links: 0 });
+    }
+    const bucket = timelineBuckets.get(date)!;
+
+    const mt = row.media_type?.toLowerCase() ?? '';
+    if (mt === 'image') bucket.images++;
+    else if (mt === 'video') bucket.videos++;
+    else if (mt === 'audio') bucket.audio++;
+
+    const urls = extractUrls(row.text);
+    bucket.links += urls.length;
+  }
+
+  const mediaTimeline: MediaTimelinePoint[] = [...timelineBuckets.entries()]
+    .filter(([, b]) => b.images + b.videos + b.audio + b.links > 0)
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([date, b]) => ({ date, ...b }));
+
+  // --- Sharing asymmetry ---
+  const contactMedia = new Map<string, { name: string; mediaSent: number; mediaReceived: number }>();
+  for (const row of rows) {
+    const mt = row.media_type?.toLowerCase() ?? '';
+    if (!mt) continue;
+
+    const jid = row.jid ?? 'unknown';
+    const displayName = row.name ?? row.contact_name ?? jid;
+    if (!contactMedia.has(jid)) {
+      contactMedia.set(jid, { name: displayName, mediaSent: 0, mediaReceived: 0 });
+    }
+    const entry = contactMedia.get(jid)!;
+    if (row.from_me) entry.mediaSent++;
+    else entry.mediaReceived++;
+  }
+
+  const sharingAsymmetry: SharingAsymmetryStat[] = [...new Set([...contactMedia.keys(), ...contactLinks.keys()])]
+    .map((jid) => {
+      const media = contactMedia.get(jid) ?? { name: jid, mediaSent: 0, mediaReceived: 0 };
+      const links = contactLinks.get(jid) ?? { name: jid, sent: 0, received: 0 };
+      const name = media.name !== jid ? media.name : links.name;
+      return {
+        jid,
+        name,
+        mediaSent: media.mediaSent,
+        mediaReceived: media.mediaReceived,
+        linksSent: links.sent,
+        linksReceived: links.received,
+      };
+    })
+    .filter((s) => s.mediaSent + s.mediaReceived + s.linksSent + s.linksReceived > 0)
+    .sort((a, b) => (b.mediaSent + b.mediaReceived + b.linksSent + b.linksReceived) - (a.mediaSent + a.mediaReceived + a.linksSent + a.linksReceived))
+    .slice(0, limit);
+
+  // --- First shared per contact ---
+  const firstSharedRows = db.prepare(`
+    SELECT
+      m.chat_jid,
+      ${cleanDisplayNameSql('COALESCE(chats.name, first_msg.chat_name)')} AS chat_name,
+      ${contactDisplayNameSql('fcontacts')} AS contact_name,
+      first_msg.text AS first_text,
+      first_msg.ts AS first_ts,
+      first_media.media_type AS first_media_type,
+      first_media.ts AS first_media_ts
+    FROM (
+      SELECT chat_jid, MIN(rowid) AS first_rowid
+      FROM messages
+      WHERE ts >= @since
+      GROUP BY chat_jid
+    ) m
+    LEFT JOIN messages first_msg ON first_msg.rowid = m.first_rowid
+    LEFT JOIN chats ON chats.jid = m.chat_jid
+    ${contactLeftJoins('fcontacts', 'm.chat_jid')}
+    LEFT JOIN (
+      SELECT chat_jid, MIN(rowid) AS media_rowid
+      FROM messages
+      WHERE ts >= @since AND media_type IS NOT NULL AND media_type <> ''
+      GROUP BY chat_jid
+    ) fm ON fm.chat_jid = m.chat_jid
+    LEFT JOIN messages first_media ON first_media.rowid = fm.media_rowid
+    ORDER BY first_msg.ts ASC
+    LIMIT @limit
+  `).all({ since, limit }) as FirstSharedRow[];
+
+  const firstShared: FirstSharedStat[] = firstSharedRows.map((row) => ({
+    jid: row.chat_jid,
+    name: row.chat_name ?? row.contact_name ?? row.chat_jid,
+    firstMessageText: row.first_text,
+    firstMessageDate: unixSecondsToIso(row.first_ts) ?? new Date(0).toISOString(),
+    firstMediaType: row.first_media_type,
+    firstMediaDate: row.first_media_ts ? unixSecondsToIso(row.first_media_ts) : null,
+  }));
+
+  return {
+    domainLeaderboard,
+    mediaTimeline,
+    sharingAsymmetry,
+    linkCategories,
+    firstShared,
+    totalLinks,
+    uniqueDomains,
+  };
+}
+
 export const statsRouter = Router();
 
 statsRouter.get('/overview', (_req, res) => {
@@ -847,4 +1064,8 @@ statsRouter.get('/emoji-analytics', (req, res) => {
 
 statsRouter.get('/conversation-dynamics', (req, res) => {
   res.json(getConversationDynamics(req.query));
+});
+
+statsRouter.get('/link-intelligence', (req, res) => {
+  res.json(getLinkIntelligence(req.query));
 });

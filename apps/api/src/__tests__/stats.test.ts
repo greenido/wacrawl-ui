@@ -7,6 +7,7 @@ import {
   getDayOfWeekStats,
   getGroupActivity,
   getHourOfDayStats,
+  getLinkIntelligence,
   getMediaBreakdown,
   getMediaSenders,
   getMessageStreaks,
@@ -226,6 +227,62 @@ describe('conversation dynamics', () => {
     expect(dynamics.ghostScore.length).toBeGreaterThan(0);
     expect(dynamics.relationshipTrajectory.length).toBeGreaterThan(0);
     expect(dynamics.lateNightTexters.length).toBeGreaterThanOrEqual(0);
+  });
+});
+
+describe('link intelligence', () => {
+  it('extracts domains, categories, timeline, asymmetry, and first-shared from messages', () => {
+    db = createTestDb();
+    const insert = db.prepare(`
+      INSERT INTO messages (
+        source_pk, chat_jid, chat_name, msg_id, sender_jid, sender_name, ts,
+        from_me, text, raw_type, message_type, media_type, media_path, media_size
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    insert.run(20, 'alice@s.whatsapp.net', 'Alice', 'l1', null, null, 1_700_000_100, 1, 'check this https://youtube.com/watch?v=abc', 0, 'text', null, null, null);
+    insert.run(21, 'alice@s.whatsapp.net', 'Alice', 'l2', 'alice@s.whatsapp.net', 'Alice', 1_700_086_500, 0, 'look https://reddit.com/r/test and https://youtube.com/watch?v=xyz', 0, 'text', null, null, null);
+    insert.run(22, 'family@g.us', 'Family', 'l3', 'bob@s.whatsapp.net', 'Bob', 1_700_172_900, 0, 'news https://cnn.com/article/123', 0, 'text', null, null, null);
+    insert.run(23, 'alice@s.whatsapp.net', 'Alice', 'l4', null, null, 1_700_259_300, 1, 'https://github.com/repo and https://amazon.com/product', 0, 'text', null, null, null);
+
+    const result = getLinkIntelligence({ period: 'all', limit: '10' }, db);
+
+    expect(result.totalLinks).toBe(6);
+    expect(result.uniqueDomains).toBe(5);
+
+    expect(result.domainLeaderboard[0]).toMatchObject({ domain: 'youtube.com', count: 2, category: 'video' });
+    expect(result.domainLeaderboard.find((d) => d.domain === 'reddit.com')).toMatchObject({ category: 'social' });
+    expect(result.domainLeaderboard.find((d) => d.domain === 'cnn.com')).toMatchObject({ category: 'news' });
+    expect(result.domainLeaderboard.find((d) => d.domain === 'github.com')).toMatchObject({ category: 'dev' });
+    expect(result.domainLeaderboard.find((d) => d.domain === 'amazon.com')).toMatchObject({ category: 'shopping' });
+
+    expect(result.linkCategories.length).toBeGreaterThan(0);
+    const videoCategory = result.linkCategories.find((c) => c.category === 'video');
+    expect(videoCategory).toMatchObject({ count: 2, topDomain: 'youtube.com' });
+
+    expect(result.mediaTimeline.length).toBeGreaterThan(0);
+
+    const aliceAsymmetry = result.sharingAsymmetry.find((s) => s.jid === 'alice@s.whatsapp.net');
+    expect(aliceAsymmetry).toBeDefined();
+    expect(aliceAsymmetry!.linksSent).toBeGreaterThanOrEqual(3);
+    expect(aliceAsymmetry!.linksReceived).toBeGreaterThanOrEqual(2);
+
+    expect(result.firstShared.length).toBeGreaterThan(0);
+    const aliceFirst = result.firstShared.find((f) => f.jid === 'alice@s.whatsapp.net');
+    expect(aliceFirst).toBeDefined();
+    expect(aliceFirst!.firstMessageText).toBe('hello project update');
+  });
+
+  it('returns empty results when no links exist', () => {
+    db = createTestDb();
+    db.exec("UPDATE messages SET text = 'plain text no urls'");
+    const result = getLinkIntelligence({ period: 'all' }, db);
+
+    expect(result.totalLinks).toBe(0);
+    expect(result.uniqueDomains).toBe(0);
+    expect(result.domainLeaderboard).toEqual([]);
+    expect(result.linkCategories).toEqual([]);
   });
 });
 
