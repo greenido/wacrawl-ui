@@ -39,7 +39,10 @@
     "test": "npm run test -w @wacrawl/api",
     "preview": "npm run preview -w @wacrawl/web",
     "typecheck": "npm run typecheck -w @wacrawl/api && npm run typecheck -w @wacrawl/web",
-    "prepublishOnly": "npm run build",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "verify": "npm run lint && npm run typecheck && npm test",
+    "prepublishOnly": "npm run verify && npm run build",
     "publish:verify-auth": "npm whoami",
     "publish:npm": "npm run publish:verify-auth && npm publish --access public"
   },
@@ -55,7 +58,13 @@
     "stopword": "^3.1.5"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "concurrently": "^9.2.1",
-    "typescript": "^5.9.3"
+    "eslint": "^10.8.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "eslint-plugin-react-refresh": "^0.5.3",
+    "globals": "^17.9.0",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.66.0"
   }
 }

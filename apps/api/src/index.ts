@@ -64,7 +64,7 @@ export function createApp(): express.Express {
       ensurePrimaryDatabase();
       primaryDbReadable = true;
     } catch {
-      primaryDbReadable = false;
+      // Left false — /api/health reports the archive as unreachable.
     }
 
     const mediaStatus = isMediaRootAccessible();

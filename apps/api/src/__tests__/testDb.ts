@@ -1,7 +1,7 @@
 import Database from 'better-sqlite3';
 
-export function createTestDb(): Database.Database {
-  const db = new Database(':memory:');
+export function createTestDb(target = ':memory:'): Database.Database {
+  const db = new Database(target);
   db.exec(`
     CREATE TABLE chats (
       jid TEXT PRIMARY KEY,
