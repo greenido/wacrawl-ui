@@ -24,6 +24,28 @@ const ALLOWED_HOSTS = new Set([
   `127.0.0.1:${PORT}`,
 ]);
 
+export const errorHandler: ErrorRequestHandler = (error, _req, res, next) => {
+  // Once the response is on the wire there is no way to replace it with a JSON
+  // error — writing anyway throws ERR_HTTP_HEADERS_SENT. Hand back to Express so
+  // its final handler destroys the socket instead.
+  if (res.headersSent) {
+    next(error);
+    return;
+  }
+
+  const code = error?.code === 'SQLITE_CANTOPEN' ? 'DATABASE_UNAVAILABLE' : 'INTERNAL_ERROR';
+  const message = code === 'DATABASE_UNAVAILABLE'
+    ? 'Cannot open the WaCrawl database. Check Settings → Archive paths, WACRAWL_DB in .env, or run wacrawl sync.'
+    : 'Unexpected server error.';
+
+  res.status(code === 'DATABASE_UNAVAILABLE' ? 503 : 500).json({
+    error: {
+      code,
+      message,
+    },
+  });
+};
+
 export function createApp(): express.Express {
   const app = express();
 
@@ -105,20 +127,6 @@ export function createApp(): express.Express {
       res.sendFile('index.html', { root: staticDir });
     });
   }
-
-  const errorHandler: ErrorRequestHandler = (error, _req, res, _next) => {
-    const code = error?.code === 'SQLITE_CANTOPEN' ? 'DATABASE_UNAVAILABLE' : 'INTERNAL_ERROR';
-    const message = code === 'DATABASE_UNAVAILABLE'
-      ? 'Cannot open the WaCrawl database. Check Settings → Archive paths, WACRAWL_DB in .env, or run wacrawl sync.'
-      : 'Unexpected server error.';
-
-    res.status(code === 'DATABASE_UNAVAILABLE' ? 503 : 500).json({
-      error: {
-        code,
-        message,
-      },
-    });
-  };
 
   app.use(errorHandler);
 
