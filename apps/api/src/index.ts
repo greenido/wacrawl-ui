@@ -10,19 +10,33 @@ import { getResolvedPaths, pathsMiddleware } from './runtimePaths.js';
 
 const PORT = Number(process.env.PORT ?? 3001);
 const HOST = '127.0.0.1';
-const ALLOWED_ORIGINS = new Set([
-  'http://localhost:5173',
-  'http://127.0.0.1:5173',
-  'http://localhost:4173',
-  'http://127.0.0.1:4173',
-  // Also allow same-origin requests when API serves the web frontend directly
-  `http://localhost:${PORT}`,
-  `http://127.0.0.1:${PORT}`,
-]);
 const ALLOWED_HOSTS = new Set([
   `localhost:${PORT}`,
   `127.0.0.1:${PORT}`,
 ]);
+
+const LOOPBACK_HOSTNAMES = new Set(['localhost', '127.0.0.1', '[::1]', '::1']);
+
+/**
+ * Accept any origin served from this machine.
+ *
+ * Pinning the allowlist to ports 5173/4173 was brittle: Vite silently moves to
+ * 5174 when 5173 is already taken, and from then on every request failed with an
+ * opaque 500 that surfaced in the UI as "Cannot connect to the WaCrawl API".
+ *
+ * Widening to loopback costs little here — the server binds 127.0.0.1 and
+ * enforces the Host allowlist above, so the only pages that can reach it are
+ * ones already being served from this machine.
+ */
+export function isLoopbackOrigin(origin: string): boolean {
+  try {
+    const { hostname, protocol } = new URL(origin);
+    if (protocol !== 'http:' && protocol !== 'https:') return false;
+    return LOOPBACK_HOSTNAMES.has(hostname);
+  } catch {
+    return false;
+  }
+}
 
 export const errorHandler: ErrorRequestHandler = (error, _req, res, next) => {
   // Once the response is on the wire there is no way to replace it with a JSON
@@ -30,6 +44,18 @@ export const errorHandler: ErrorRequestHandler = (error, _req, res, next) => {
   // its final handler destroys the socket instead.
   if (res.headersSent) {
     next(error);
+    return;
+  }
+
+  if (error?.code === 'FORBIDDEN_ORIGIN') {
+    // Was an opaque 500 before, which the UI reported as "Cannot connect to the
+    // WaCrawl API" with no hint that the origin was the problem.
+    res.status(403).json({
+      error: {
+        code: 'FORBIDDEN_ORIGIN',
+        message: `Blocked request from origin ${error.origin ?? 'unknown'}. The dashboard must be served from localhost.`,
+      },
+    });
     return;
   }
 
@@ -69,11 +95,16 @@ export function createApp(): express.Express {
 
   app.use(cors({
     origin(origin, callback) {
-      if (!origin || ALLOWED_ORIGINS.has(origin)) {
+      // No Origin header: same-origin, or a non-browser client such as curl or
+      // an <img> tag pointing at /api/media/file.
+      if (!origin || isLoopbackOrigin(origin)) {
         callback(null, true);
         return;
       }
-      callback(new Error('Origin is not allowed by CORS.'));
+      callback(Object.assign(new Error('Origin is not allowed by CORS.'), {
+        code: 'FORBIDDEN_ORIGIN',
+        origin,
+      }));
     },
   }));
 
