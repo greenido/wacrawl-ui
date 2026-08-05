@@ -274,6 +274,33 @@ describe('link intelligence', () => {
     expect(aliceFirst!.firstMessageText).toBe('hello project update');
   });
 
+  it('builds the media timeline from link and media rows only', () => {
+    db = createTestDb();
+    const insert = db.prepare(`
+      INSERT INTO messages (
+        source_pk, chat_jid, chat_name, msg_id, sender_jid, sender_name, ts,
+        from_me, text, raw_type, message_type, media_type, media_path, media_size
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    insert.run(30, 'alice@s.whatsapp.net', 'Alice', 'l5', null, null, 1_700_000_100, 1, 'link only https://github.com/repo', 0, 'text', null, null, null);
+    // A document counts as shared media but has no place on the image/video/audio timeline.
+    insert.run(31, 'alice@s.whatsapp.net', 'Alice', 'l6', null, null, 1_700_000_200, 1, 'contract attached', 0, 'document', 'document', '/tmp/a.pdf', 10);
+
+    const result = getLinkIntelligence({ period: 'all' }, db);
+
+    // Plain-text days produce no bucket at all; the document adds nothing to 11-14.
+    expect(result.mediaTimeline).toEqual([
+      { date: '2023-11-14', images: 0, videos: 0, audio: 0, links: 1 },
+      { date: '2023-11-15', images: 1, videos: 0, audio: 0, links: 0 },
+      { date: '2023-11-18', images: 0, videos: 0, audio: 1, links: 0 },
+    ]);
+
+    const alice = result.sharingAsymmetry.find((s) => s.jid === 'alice@s.whatsapp.net');
+    expect(alice).toMatchObject({ mediaSent: 1, mediaReceived: 1, linksSent: 1, linksReceived: 0 });
+  });
+
   it('returns empty results when no links exist', () => {
     db = createTestDb();
     db.exec("UPDATE messages SET text = 'plain text no urls'");

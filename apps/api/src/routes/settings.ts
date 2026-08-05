@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { closeDb } from '../db.js';
+import { clearStatsCache } from '../lib/statsCache.js';
 import {
   clearDashboardPathsOverride,
   mergePathPatch,
@@ -43,6 +44,7 @@ settingsRouter.post('/paths', (req, res) => {
 
   writeDashboardPathsOverride(patch);
   closeDb();
+  clearStatsCache();
 
   const effective = mergePathPatch(resolvePathsFromEnv(), patch);
   res.json({ ok: true, effective });
@@ -51,5 +53,6 @@ settingsRouter.post('/paths', (req, res) => {
 settingsRouter.delete('/paths', (_req, res) => {
   clearDashboardPathsOverride();
   closeDb();
+  clearStatsCache();
   res.json({ ok: true, effective: resolvePathsFromEnv() });
 });

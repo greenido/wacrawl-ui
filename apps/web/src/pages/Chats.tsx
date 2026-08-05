@@ -57,8 +57,8 @@ export function Chats() {
 
         setChats(mergedChats);
         setTotalChats(listRes.pagination.total + (targetChat && !listRes.data.some((c) => c.jid === targetChat!.jid) ? 1 : 0));
-      } catch (err: any) {
-        if (active) setError(err.message);
+      } catch (err) {
+        if (active) setError(err instanceof Error ? err.message : String(err));
       } finally {
         if (active) setLoadingChats(false);
       }
@@ -115,8 +115,8 @@ export function Chats() {
             if (active) setHighlightedMsgId(null);
           }, 3500);
         }
-      } catch (err: any) {
-        if (active) setError(err.message);
+      } catch (err) {
+        if (active) setError(err instanceof Error ? err.message : String(err));
       } finally {
         if (active) setLoadingMessages(false);
       }

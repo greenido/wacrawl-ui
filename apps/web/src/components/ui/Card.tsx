@@ -1,9 +1,9 @@
 import type { HTMLAttributes, KeyboardEvent, PropsWithChildren } from 'react';
 import { cn } from '../../lib/utils';
 
-interface CardProps extends PropsWithChildren<HTMLAttributes<HTMLElement>> {}
+type CardProps = PropsWithChildren<HTMLAttributes<HTMLElement>>;
 
-interface CardTitleProps extends PropsWithChildren<HTMLAttributes<HTMLHeadingElement>> {}
+type CardTitleProps = PropsWithChildren<HTMLAttributes<HTMLHeadingElement>>;
 
 interface ClickableCardProps extends CardProps {
   onActivate: () => void;

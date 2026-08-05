@@ -1,7 +1,9 @@
 import { Router } from 'express';
+import type { Request, RequestHandler } from 'express';
 import type { Database } from 'better-sqlite3';
 import { getDb } from '../db.js';
 import { cleanDisplayNameSql, contactDisplayNameSql, contactLeftJoins } from '../lib/displayName.js';
+import { etagFor, getCached, statsCacheKey } from '../lib/statsCache.js';
 import {
   bucketDateSql,
   normalizeBucketDate,
@@ -592,6 +594,9 @@ export function getEmojiAnalytics(params: { period?: unknown; limit?: unknown },
 const SESSION_GAP_SECONDS = 4 * 3600;
 const GHOST_WINDOW_SECONDS = 24 * 3600;
 
+/** Upper bound on rows pulled into memory for session analysis (3 narrow columns each). */
+const CONVERSATION_DYNAMICS_MAX_ROWS = 250_000;
+
 interface ChatMessageRow {
   chat_jid: string;
   ts: number;
@@ -645,11 +650,19 @@ export function getConversationDynamics(
   const limit = parseLimit(params.limit, 10, 50);
   const timeZone = resolveStatsTimeZone(params.timeZone);
 
+  // Session detection needs every message, not just the interesting ones, so this
+  // is capped by recency the way the word cloud and emoji scans are — an unbounded
+  // "all time" load would pull the whole archive into memory on a blocking query.
   const rows = db.prepare(`
-    SELECT m.chat_jid, m.ts, m.from_me
-    FROM messages m
-    WHERE m.ts >= @since
-    ORDER BY m.chat_jid, m.ts, m.rowid
+    SELECT chat_jid, ts, from_me
+    FROM (
+      SELECT chat_jid, ts, from_me, rowid
+      FROM messages
+      WHERE ts >= @since
+      ORDER BY ts DESC, rowid DESC
+      LIMIT ${CONVERSATION_DYNAMICS_MAX_ROWS}
+    )
+    ORDER BY chat_jid, ts, rowid
   `).all({ since }) as ChatMessageRow[];
 
   const chatGroups = new Map<string, ChatMessageRow[]>();
@@ -794,6 +807,9 @@ export function getConversationDynamics(
   return { initiationRatio, conversationDepth, ghostScore, relationshipTrajectory, lateNightTexters };
 }
 
+/** Backstop on rows pulled into memory after the link/media prefilter. */
+const LINK_INTELLIGENCE_MAX_ROWS = 100_000;
+
 interface LinkMessageRow {
   text: string | null;
   ts: number;
@@ -821,56 +837,98 @@ export function getLinkIntelligence(
   const since = sinceTimestamp(parsePeriod(params.period));
   const limit = parseLimit(params.limit, 15, 50);
 
+  // Only messages that carry a link or media can contribute to any output below,
+  // so the prefilter is lossless: extractUrls only matches http(s):// URLs, and
+  // SQLite LIKE is case-insensitive for ASCII. It keeps the joins — and the row
+  // materialization — off the (typically large) majority of plain-text messages.
   const rows = db.prepare(`
-    SELECT
-      messages.text,
-      messages.ts,
-      messages.from_me,
-      messages.media_type,
-      CASE WHEN messages.from_me = 1 THEN messages.chat_jid ELSE COALESCE(messages.sender_jid, messages.chat_jid) END AS jid,
-      ${cleanDisplayNameSql(`CASE WHEN messages.from_me = 1 THEN COALESCE(chats.name, messages.chat_name) ELSE messages.sender_name END`)} AS name,
-      ${contactDisplayNameSql('contacts')} AS contact_name
-    FROM messages
-    LEFT JOIN chats ON chats.jid = CASE WHEN messages.from_me = 1 THEN messages.chat_jid ELSE COALESCE(messages.sender_jid, messages.chat_jid) END
-    ${contactLeftJoins('contacts', 'CASE WHEN messages.from_me = 1 THEN messages.chat_jid ELSE COALESCE(messages.sender_jid, messages.chat_jid) END')}
-    WHERE messages.ts >= @since
-    ORDER BY messages.ts ASC
+    SELECT text, ts, from_me, media_type, jid, name, contact_name
+    FROM (
+      SELECT
+        messages.rowid,
+        messages.text,
+        messages.ts,
+        messages.from_me,
+        messages.media_type,
+        CASE WHEN messages.from_me = 1 THEN messages.chat_jid ELSE COALESCE(messages.sender_jid, messages.chat_jid) END AS jid,
+        ${cleanDisplayNameSql(`CASE WHEN messages.from_me = 1 THEN COALESCE(chats.name, messages.chat_name) ELSE messages.sender_name END`)} AS name,
+        ${contactDisplayNameSql('contacts')} AS contact_name
+      FROM messages
+      LEFT JOIN chats ON chats.jid = CASE WHEN messages.from_me = 1 THEN messages.chat_jid ELSE COALESCE(messages.sender_jid, messages.chat_jid) END
+      ${contactLeftJoins('contacts', 'CASE WHEN messages.from_me = 1 THEN messages.chat_jid ELSE COALESCE(messages.sender_jid, messages.chat_jid) END')}
+      WHERE messages.ts >= @since
+        AND (
+          messages.text LIKE '%http%'
+          OR (messages.media_type IS NOT NULL AND messages.media_type <> '')
+        )
+      ORDER BY messages.ts DESC, messages.rowid DESC
+      LIMIT ${LINK_INTELLIGENCE_MAX_ROWS}
+    )
+    ORDER BY ts ASC, rowid ASC
   `).all({ since }) as LinkMessageRow[];
 
-  // --- Domain leaderboard + categories ---
   const domainCounts = new Map<string, number>();
-  const linksByDate = new Map<string, number>();
   const contactLinks = new Map<string, { name: string; sent: number; received: number }>();
+  const contactMedia = new Map<string, { name: string; mediaSent: number; mediaReceived: number }>();
+  const timelineBuckets = new Map<string, { images: number; videos: number; audio: number; links: number }>();
   let totalLinks = 0;
 
+  // Single pass: the leaderboard, the timeline and the asymmetry table all read
+  // the same rows, and extracting URLs twice per row was the dominant cost here.
   for (const row of rows) {
     const urls = extractUrls(row.text);
-    if (urls.length === 0) continue;
-
-    totalLinks += urls.length;
-    const date = new Date(row.ts * 1000).toISOString().slice(0, 10);
-    linksByDate.set(date, (linksByDate.get(date) ?? 0) + urls.length);
+    const mediaType = row.media_type?.toLowerCase() ?? '';
+    const isTimelineMedia = mediaType === 'image' || mediaType === 'video' || mediaType === 'audio';
+    if (urls.length === 0 && !mediaType) continue;
 
     const jid = row.jid ?? 'unknown';
     const displayName = row.name ?? row.contact_name ?? jid;
-    if (!contactLinks.has(jid)) {
-      contactLinks.set(jid, { name: displayName, sent: 0, received: 0 });
-    }
-    const entry = contactLinks.get(jid)!;
-    if (row.from_me) {
-      entry.sent += urls.length;
-    } else {
-      entry.received += urls.length;
+
+    if (urls.length > 0) {
+      totalLinks += urls.length;
+
+      if (!contactLinks.has(jid)) {
+        contactLinks.set(jid, { name: displayName, sent: 0, received: 0 });
+      }
+      const entry = contactLinks.get(jid)!;
+      if (row.from_me) {
+        entry.sent += urls.length;
+      } else {
+        entry.received += urls.length;
+      }
+
+      for (const url of urls) {
+        const domain = parseDomain(url);
+        if (domain) {
+          domainCounts.set(domain, (domainCounts.get(domain) ?? 0) + 1);
+        }
+      }
     }
 
-    for (const url of urls) {
-      const domain = parseDomain(url);
-      if (domain) {
-        domainCounts.set(domain, (domainCounts.get(domain) ?? 0) + 1);
+    if (mediaType) {
+      if (!contactMedia.has(jid)) {
+        contactMedia.set(jid, { name: displayName, mediaSent: 0, mediaReceived: 0 });
       }
+      const entry = contactMedia.get(jid)!;
+      if (row.from_me) entry.mediaSent++;
+      else entry.mediaReceived++;
+    }
+
+    if (urls.length > 0 || isTimelineMedia) {
+      const date = new Date(row.ts * 1000).toISOString().slice(0, 10);
+      let bucket = timelineBuckets.get(date);
+      if (!bucket) {
+        bucket = { images: 0, videos: 0, audio: 0, links: 0 };
+        timelineBuckets.set(date, bucket);
+      }
+      if (mediaType === 'image') bucket.images++;
+      else if (mediaType === 'video') bucket.videos++;
+      else if (mediaType === 'audio') bucket.audio++;
+      bucket.links += urls.length;
     }
   }
 
+  // --- Domain leaderboard + categories ---
   const domainLeaderboard: LinkDomainStat[] = [...domainCounts.entries()]
     .sort((a, b) => b[1] - a[1])
     .slice(0, limit)
@@ -898,44 +956,12 @@ export function getLinkIntelligence(
     });
 
   // --- Media timeline density ---
-  const timelineBuckets = new Map<string, { images: number; videos: number; audio: number; links: number }>();
-  for (const row of rows) {
-    const date = new Date(row.ts * 1000).toISOString().slice(0, 10);
-    if (!timelineBuckets.has(date)) {
-      timelineBuckets.set(date, { images: 0, videos: 0, audio: 0, links: 0 });
-    }
-    const bucket = timelineBuckets.get(date)!;
-
-    const mt = row.media_type?.toLowerCase() ?? '';
-    if (mt === 'image') bucket.images++;
-    else if (mt === 'video') bucket.videos++;
-    else if (mt === 'audio') bucket.audio++;
-
-    const urls = extractUrls(row.text);
-    bucket.links += urls.length;
-  }
-
   const mediaTimeline: MediaTimelinePoint[] = [...timelineBuckets.entries()]
     .filter(([, b]) => b.images + b.videos + b.audio + b.links > 0)
     .sort((a, b) => a[0].localeCompare(b[0]))
     .map(([date, b]) => ({ date, ...b }));
 
   // --- Sharing asymmetry ---
-  const contactMedia = new Map<string, { name: string; mediaSent: number; mediaReceived: number }>();
-  for (const row of rows) {
-    const mt = row.media_type?.toLowerCase() ?? '';
-    if (!mt) continue;
-
-    const jid = row.jid ?? 'unknown';
-    const displayName = row.name ?? row.contact_name ?? jid;
-    if (!contactMedia.has(jid)) {
-      contactMedia.set(jid, { name: displayName, mediaSent: 0, mediaReceived: 0 });
-    }
-    const entry = contactMedia.get(jid)!;
-    if (row.from_me) entry.mediaSent++;
-    else entry.mediaReceived++;
-  }
-
   const sharingAsymmetry: SharingAsymmetryStat[] = [...new Set([...contactMedia.keys(), ...contactLinks.keys()])]
     .map((jid) => {
       const media = contactMedia.get(jid) ?? { name: jid, mediaSent: 0, mediaReceived: 0 };
@@ -1006,66 +1032,46 @@ export function getLinkIntelligence(
 
 export const statsRouter = Router();
 
-statsRouter.get('/overview', (_req, res) => {
-  res.json(getOverviewStats());
-});
+/**
+ * Wrap a stats query in the archive-fingerprinted cache.
+ *
+ * Every one of these aggregations is expensive and better-sqlite3 is synchronous,
+ * so an uncached dashboard load blocks the event loop once per chart. Repeat loads
+ * and period toggles now hit memory, and conditional requests short-circuit to 304
+ * before the query runs at all.
+ */
+function cachedStats<T>(route: string, compute: (query: Request['query']) => T): RequestHandler {
+  return (req, res) => {
+    const key = statsCacheKey(route, req.query as Record<string, unknown>);
+    const etag = etagFor(key);
 
-statsRouter.get('/top-contacts', (req, res) => {
-  res.json(getTopContacts(req.query));
-});
+    // no-cache = revalidate every time, so a re-synced archive is picked up
+    // immediately; revalidation itself never touches SQLite.
+    res.setHeader('Cache-Control', 'private, no-cache');
+    res.setHeader('ETag', etag);
 
-statsRouter.get('/message-volume', (req, res) => {
-  res.json(getMessageVolume(req.query));
-});
+    if (req.headers['if-none-match'] === etag) {
+      res.status(304).end();
+      return;
+    }
 
-statsRouter.get('/activity-heatmap', (req, res) => {
-  res.json(getActivityHeatmap(req.query));
-});
+    res.json(getCached(key, () => compute(req.query)));
+  };
+}
 
-statsRouter.get('/hour-of-day', (req, res) => {
-  res.json(getHourOfDayStats(req.query));
-});
-
-statsRouter.get('/day-of-week', (req, res) => {
-  res.json(getDayOfWeekStats(req.query));
-});
-
-statsRouter.get('/media-breakdown', (req, res) => {
-  res.json(getMediaBreakdown(req.query));
-});
-
-statsRouter.get('/media-senders', (req, res) => {
-  res.json(getMediaSenders(req.query));
-});
-
-statsRouter.get('/sent-received-ratio', (req, res) => {
-  res.json(getSentReceivedRatio(req.query));
-});
-
-statsRouter.get('/response-times', (req, res) => {
-  res.json(getResponseTimes(req.query));
-});
-
-statsRouter.get('/group-activity', (req, res) => {
-  res.json(getGroupActivity(req.query));
-});
-
-statsRouter.get('/streaks', (req, res) => {
-  res.json(getMessageStreaks(req.query));
-});
-
-statsRouter.get('/word-cloud', (req, res) => {
-  res.json(getWordCloud(req.query));
-});
-
-statsRouter.get('/emoji-analytics', (req, res) => {
-  res.json(getEmojiAnalytics(req.query));
-});
-
-statsRouter.get('/conversation-dynamics', (req, res) => {
-  res.json(getConversationDynamics(req.query));
-});
-
-statsRouter.get('/link-intelligence', (req, res) => {
-  res.json(getLinkIntelligence(req.query));
-});
+statsRouter.get('/overview', cachedStats('overview', () => getOverviewStats()));
+statsRouter.get('/top-contacts', cachedStats('top-contacts', (query) => getTopContacts(query)));
+statsRouter.get('/message-volume', cachedStats('message-volume', (query) => getMessageVolume(query)));
+statsRouter.get('/activity-heatmap', cachedStats('activity-heatmap', (query) => getActivityHeatmap(query)));
+statsRouter.get('/hour-of-day', cachedStats('hour-of-day', (query) => getHourOfDayStats(query)));
+statsRouter.get('/day-of-week', cachedStats('day-of-week', (query) => getDayOfWeekStats(query)));
+statsRouter.get('/media-breakdown', cachedStats('media-breakdown', (query) => getMediaBreakdown(query)));
+statsRouter.get('/media-senders', cachedStats('media-senders', (query) => getMediaSenders(query)));
+statsRouter.get('/sent-received-ratio', cachedStats('sent-received-ratio', (query) => getSentReceivedRatio(query)));
+statsRouter.get('/response-times', cachedStats('response-times', (query) => getResponseTimes(query)));
+statsRouter.get('/group-activity', cachedStats('group-activity', (query) => getGroupActivity(query)));
+statsRouter.get('/streaks', cachedStats('streaks', (query) => getMessageStreaks(query)));
+statsRouter.get('/word-cloud', cachedStats('word-cloud', (query) => getWordCloud(query)));
+statsRouter.get('/emoji-analytics', cachedStats('emoji-analytics', (query) => getEmojiAnalytics(query)));
+statsRouter.get('/conversation-dynamics', cachedStats('conversation-dynamics', (query) => getConversationDynamics(query)));
+statsRouter.get('/link-intelligence', cachedStats('link-intelligence', (query) => getLinkIntelligence(query)));

@@ -1,4 +1,4 @@
-import { BarChart3, HelpCircle, Image, LayoutDashboard, MessageCircle, Search, Settings as SettingsIcon, Users } from 'lucide-react';
+import { HelpCircle, Image, LayoutDashboard, MessageCircle, Search, Settings as SettingsIcon, Users } from 'lucide-react';
 import { NavLink } from 'react-router-dom';
 import { cn } from '../../lib/utils';
 
@@ -20,9 +20,13 @@ export function Sidebar({ onOpenHelp }: SidebarProps) {
     <aside className="fixed inset-y-0 left-0 flex w-[220px] flex-col border-r border-slate-200 bg-slate-950 text-white">
       <div className="border-b border-white/10 p-5">
         <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-brand-500">
-            <BarChart3 className="h-5 w-5" />
-          </div>
+          <img
+            src="/favicon.svg"
+            alt=""
+            className="h-10 w-10 rounded-2xl shadow-lg shadow-brand-500/20"
+            width={40}
+            height={40}
+          />
           <div>
             <p className="text-sm text-white/60">Local analytics</p>
             <h1 className="text-lg font-semibold">WaCrawl</h1>

@@ -53,6 +53,17 @@ interface SearchMessageRow extends MessageRow {
   snippet?: string | null;
 }
 
+/**
+ * Socket errors that mean "the client went away", not "the server failed".
+ * EPIPE and ECONNRESET surface when we are still writing a file the browser has
+ * already stopped reading; ECONNABORTED is send()'s own name for the same thing.
+ */
+const CLIENT_DISCONNECT_CODES = new Set(['ECONNABORTED', 'ECONNRESET', 'EPIPE']);
+
+export function isClientDisconnect(errCode: string | undefined): boolean {
+  return errCode !== undefined && CLIENT_DISCONNECT_CODES.has(errCode);
+}
+
 function asPagination<T>(data: T[], limit: number, offset: number, total: number): ListResponse<T> {
   return { data, pagination: { limit, offset, total } };
 }
@@ -476,6 +487,15 @@ dataRouter.get('/media/file', (req, res, next) => {
   res.sendFile(absolutePath, (err) => {
     if (!err) return;
     const errCode = (err as NodeJS.ErrnoException).code;
+
+    // Browsers hang up on media requests constantly — <video> probing for
+    // metadata, the user scrolling a thumbnail out of view, seeking to a new
+    // range. The socket is gone and the response is half-written, so there is
+    // no one to report to and nothing left to send.
+    if (isClientDisconnect(errCode) || res.headersSent) {
+      return;
+    }
+
     if (errCode === 'ENOENT') {
       res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Media file was not found on disk.' } });
       return;
