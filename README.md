@@ -4,6 +4,8 @@
 
 A local analytics dashboard for the SQLite archive produced by [wacrawl](https://github.com/steipete/wacrawl). It answers the questions you never asked out loud: who texts you first, who ghosts you, which group chat is really a monologue, and exactly how many times you've sent 😂 this year. (It's a lot. We've seen your data. Well, *we* haven't. That's the point.)
 
+You can read more about it [here](https://greenido.dev/2026/05/21/unlock-whatsapp-data-with-local-analytics-dashboard/).
+
 Everything runs on your machine. The API binds to `127.0.0.1`, opens the archive **read-only**, and has no interest in phoning home. Your chats stay between you, your friends, and that one cousin who forwards chain messages.
 
 ![WaCrawl Dashboard screenshot](docs/dashboard-2.png)
