@@ -2,11 +2,14 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   api,
   type ActivityHeatmapPoint,
+  type ArchivedChats,
   type ConversationDynamics,
   type DayOfWeekStat,
+  type DistinctiveWords,
   type DormancyReport,
   type EmojiAnalytics,
   type GroupActivityStat,
+  type GroupLifecycle,
   type HourOfDayStat,
   type MediaBreakdownStat,
   type MediaSenderStat,
@@ -17,6 +20,7 @@ import {
   type ResponseTimeStat,
   type SentReceivedRatioPoint,
   type TopContact,
+  type WeeklyRhythm,
   type WordCloud,
 } from '../api/client';
 import { useAppStore } from '../store/appStore';
@@ -39,6 +43,10 @@ export interface DashboardData {
   emojiAnalytics: EmojiAnalytics | null;
   conversationDynamics: ConversationDynamics | null;
   dormancy: DormancyReport | null;
+  weeklyRhythm: WeeklyRhythm | null;
+  distinctiveWords: DistinctiveWords | null;
+  groupLifecycle: GroupLifecycle | null;
+  archivedChats: ArchivedChats | null;
   heatmapYear: number;
   loadingOverview: boolean;
   loadingCharts: boolean;
@@ -63,6 +71,10 @@ const EMPTY: Omit<DashboardData, 'heatmapYear' | 'loadingOverview' | 'loadingCha
   emojiAnalytics: null,
   conversationDynamics: null,
   dormancy: null,
+  weeklyRhythm: null,
+  distinctiveWords: null,
+  groupLifecycle: null,
+  archivedChats: null,
 };
 
 /**
@@ -123,11 +135,16 @@ export function useDashboardData(): DashboardData {
       api.emojiAnalytics(period, 15),
       api.conversationDynamics(period, 8),
       api.dormancy(6),
+      api.weeklyRhythm(period),
+      api.distinctiveWords(period, 12),
+      api.groupLifecycle(6),
+      api.archivedChats(6),
     ])
       .then(([
         topContacts, messageVolume, heatmap, hourOfDay, dayOfWeek, mediaBreakdown, mediaSenders,
         sentReceivedRatio, responseTimes, replyLatency, groupActivity, streaks, wordCloud,
-        emojiAnalytics, conversationDynamics, dormancy,
+        emojiAnalytics, conversationDynamics, dormancy, weeklyRhythm, distinctiveWords, groupLifecycle,
+        archivedChats,
       ]) => {
         if (!active) return;
         setData((current) => ({
@@ -148,6 +165,10 @@ export function useDashboardData(): DashboardData {
           emojiAnalytics,
           conversationDynamics,
           dormancy,
+          weeklyRhythm,
+          distinctiveWords,
+          groupLifecycle,
+          archivedChats,
         }));
       })
       .catch((err: Error) => {

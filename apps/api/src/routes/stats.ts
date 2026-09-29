@@ -2,7 +2,7 @@ import { Router } from 'express';
 import type { Request, RequestHandler } from 'express';
 import type { Database } from 'better-sqlite3';
 import { getDb } from '../db.js';
-import { chatKindSql, parseChatKind, tableExists } from '../lib/chatKind.js';
+import { chatKindSql, columnExists, parseChatKind, tableExists } from '../lib/chatKind.js';
 import { canonicalJidSql, cleanDisplayNameSql, contactDisplayNameSql, contactLeftJoins } from '../lib/displayName.js';
 import { resolveSelfJids } from '../lib/selfIdentity.js';
 import { mean, percentile } from '../lib/percentile.js';
@@ -26,16 +26,20 @@ import {
   monthInTimezone,
   resolveStatsTimeZone,
   tsModifierSql,
+  weekdayHourInTimezone,
 } from '../lib/timezone.js';
 import { USEFUL_WORD_STOP_SET } from '../lib/wordCloudUsefulStopWords.js';
 import { categorizeDomain, extractUrls, parseDomain } from '../lib/urlExtract.js';
 import type {
   ActivityHeatmapPoint,
-  ConversationDynamics,
+  ArchivedChats,
   ContactProfile,
   ContactProfileSilence,
   ConversationDepthStat,
+  ConversationDynamics,
   DayOfWeekStat,
+  DistinctiveTerm,
+  DistinctiveWords,
   DormancyReport,
   EmojiAnalytics,
   EmojiContactStat,
@@ -44,6 +48,9 @@ import type {
   GhostScoreStat,
   GroupActivityStat,
   GroupDirectoryEntry,
+  GroupFoundingYear,
+  GroupGraveyardEntry,
+  GroupLifecycle,
   GroupProfile,
   HourOfDayStat,
   InitiationRatioStat,
@@ -63,6 +70,8 @@ import type {
   SentReceivedRatioPoint,
   SharingAsymmetryStat,
   TopContact,
+  WeeklyRhythm,
+  WeeklyRhythmCell,
   WordCloud,
   WordCloudTerm,
   YearChatStat,
@@ -2155,6 +2164,284 @@ export function getLinkIntelligence(
   };
 }
 
+/**
+ * Hour × weekday grid: the week's rhythm as one picture.
+ *
+ * Hour-of-day and day-of-week each flatten the other axis away, so "Sunday
+ * night" and "Tuesday lunch" never show up as the peaks they are.
+ */
+export function getWeeklyRhythm(params: { period?: unknown; timeZone?: unknown }, db: Database = getDb()): WeeklyRhythm {
+  const since = sinceTimestamp(parsePeriod(params.period));
+  const timeZone = resolveStatsTimeZone(params.timeZone);
+  const rows = db.prepare('SELECT ts FROM messages WHERE ts >= @since').all({ since }) as { ts: number }[];
+
+  const counts = new Array<number>(7 * 24).fill(0);
+  for (const row of rows) {
+    const { weekday, hour } = weekdayHourInTimezone(row.ts, timeZone);
+    counts[weekday * 24 + hour] += 1;
+  }
+
+  const cells: WeeklyRhythmCell[] = counts.map((count, index) => ({ day: Math.floor(index / 24), hour: index % 24, count }));
+  const peak = cells.reduce<WeeklyRhythmCell | null>((best, cell) => (cell.count > (best?.count ?? 0) ? cell : best), null);
+  return { cells, peak, total: rows.length };
+}
+
+/** Messages scanned for distinctive words; the newest ones, when the archive is larger. */
+const DISTINCTIVE_WORDS_MAX_ROWS = 60_000;
+
+/** A word must turn up this often on its own side before it can represent it. */
+const DISTINCTIVE_MIN_SIDE_COUNT = 3;
+
+/** |z| above this is the conventional 95% line; below it the lean is noise. */
+const DISTINCTIVE_MIN_Z = 1.96;
+
+/**
+ * Words that are characteristically yours, and characteristically everyone else's.
+ *
+ * Raw frequency — what the word cloud shows — ranks the words everybody uses.
+ * This ranks by weighted log-odds with an informative Dirichlet prior
+ * (Monroe, Colaresi & Quinn 2008, "Fightin' Words"), using the pooled counts as
+ * the prior. The prior shrinks rare words towards "no preference", so a word you
+ * used twice cannot outrank one you used two hundred times more than anyone else.
+ */
+export function getDistinctiveWords(
+  params: { period?: unknown; limit?: unknown },
+  db: Database = getDb(),
+): DistinctiveWords {
+  const since = sinceTimestamp(parsePeriod(params.period));
+  const limit = parseLimit(params.limit, 12, 50);
+  const rows = db.prepare(`
+    SELECT text, from_me
+    FROM messages
+    WHERE ts >= @since AND text IS NOT NULL AND TRIM(text) <> ''
+    ORDER BY ts DESC
+    LIMIT ${DISTINCTIVE_WORDS_MAX_ROWS}
+  `).all({ since }) as Array<{ text: string; from_me: number }>;
+
+  const mineCounts = new Map<string, number>();
+  const theirCounts = new Map<string, number>();
+  let mineTotal = 0;
+  let theirTotal = 0;
+  for (const row of rows) {
+    const counts = row.from_me ? mineCounts : theirCounts;
+    for (const term of row.text.toLowerCase().match(WORD_TOKEN_RE) ?? []) {
+      if (isNoiseToken(term)) continue;
+      counts.set(term, (counts.get(term) ?? 0) + 1);
+      if (row.from_me) mineTotal += 1;
+      else theirTotal += 1;
+    }
+  }
+
+  const scan = scanCoverage(rows.length, DISTINCTIVE_WORDS_MAX_ROWS);
+  // With one side silent there is nothing to contrast against.
+  if (mineTotal === 0 || theirTotal === 0) return { mine: [], theirs: [], scan };
+
+  const priorTotal = mineTotal + theirTotal;
+  const scored: DistinctiveTerm[] = [];
+  for (const text of new Set([...mineCounts.keys(), ...theirCounts.keys()])) {
+    const mine = mineCounts.get(text) ?? 0;
+    const theirs = theirCounts.get(text) ?? 0;
+    const prior = mine + theirs;
+    const delta = Math.log((mine + prior) / (mineTotal + priorTotal - mine - prior))
+      - Math.log((theirs + prior) / (theirTotal + priorTotal - theirs - prior));
+    const variance = 1 / (mine + prior) + 1 / (theirs + prior);
+    scored.push({ text, mine, theirs, score: Math.round((delta / Math.sqrt(variance)) * 100) / 100 });
+  }
+
+  const byText = (a: DistinctiveTerm, b: DistinctiveTerm) => a.text.localeCompare(b.text);
+  return {
+    mine: scored
+      .filter((term) => term.score >= DISTINCTIVE_MIN_Z && term.mine >= DISTINCTIVE_MIN_SIDE_COUNT)
+      .sort((a, b) => b.score - a.score || byText(a, b))
+      .slice(0, limit),
+    theirs: scored
+      .filter((term) => term.score <= -DISTINCTIVE_MIN_Z && term.theirs >= DISTINCTIVE_MIN_SIDE_COUNT)
+      .sort((a, b) => a.score - b.score || byText(a, b))
+      .slice(0, limit),
+    scan,
+  };
+}
+
+interface GroupLifecycleRow {
+  jid: string;
+  name: string | null;
+  messageCount: number;
+  lastTs: number | null;
+  createdAt: number | null;
+}
+
+/**
+ * How groups age, and how many of them have quietly died.
+ *
+ * "Last activity" takes the later of the newest archived message and the chat's
+ * own `last_message_at`, so a group whose history was only partly imported is
+ * not buried on the strength of the part that is missing.
+ */
+export function getGroupLifecycle(
+  params: { dormantDays?: unknown; limit?: unknown; timeZone?: unknown },
+  db: Database = getDb(),
+): GroupLifecycle {
+  const dormantDays = parseLimit(params.dormantDays, 180, 3650);
+  const limit = parseLimit(params.limit, 8, 50);
+  const timeZone = resolveStatsTimeZone(params.timeZone);
+  const hasGroupsTable = tableExists(db, 'groups');
+
+  const rows = db.prepare(`
+    SELECT
+      chats.jid AS jid,
+      COALESCE(
+        ${hasGroupsTable ? `${cleanDisplayNameSql('groups.name')},` : ''}
+        ${cleanDisplayNameSql('chats.name')},
+        ${cleanDisplayNameSql('MAX(messages.chat_name)')},
+        ${cleanDisplayNameSql('chats.jid')},
+        'Unknown'
+      ) AS name,
+      COUNT(messages.rowid) AS messageCount,
+      NULLIF(MAX(COALESCE(MAX(messages.ts), 0), COALESCE(chats.last_message_at, 0)), 0) AS lastTs,
+      ${hasGroupsTable ? 'NULLIF(groups.created_at, 0)' : 'NULL'} AS createdAt
+    FROM chats
+    ${hasGroupsTable ? 'LEFT JOIN groups ON groups.jid = chats.jid' : ''}
+    LEFT JOIN messages ON messages.chat_jid = chats.jid
+    WHERE chats.kind = 'group'
+    GROUP BY chats.jid
+  `).all() as GroupLifecycleRow[];
+
+  const now = Math.floor(Date.now() / 1000);
+  const cutoff = now - dormantDays * DAY_SECONDS;
+  const toEntry = (row: GroupLifecycleRow): GroupGraveyardEntry => ({
+    jid: row.jid,
+    name: row.name ?? row.jid,
+    messageCount: row.messageCount,
+    createdAt: unixSecondsToIso(row.createdAt),
+    lastMessageAt: unixSecondsToIso(row.lastTs),
+    daysSilent: row.lastTs == null ? null : Math.floor((now - row.lastTs) / DAY_SECONDS),
+  });
+  const isDead = (row: GroupLifecycleRow) => row.lastTs == null || row.lastTs < cutoff;
+
+  const dead = rows.filter(isDead);
+  const alive = rows.filter((row) => !isDead(row));
+
+  const ages = rows
+    .filter((row) => row.createdAt != null && row.createdAt <= now)
+    .map((row) => (now - (row.createdAt as number)) / DAY_SECONDS)
+    .sort((a, b) => a - b);
+
+  const oldestAliveRow = alive
+    .filter((row) => row.createdAt != null)
+    .sort((a, b) => (a.createdAt as number) - (b.createdAt as number))[0];
+
+  const byYear = new Map<number, GroupFoundingYear>();
+  for (const row of rows) {
+    if (row.createdAt == null) continue;
+    const year = Number(dateInTimezone(row.createdAt, timeZone).slice(0, 4));
+    const bucket = byYear.get(year) ?? { year, alive: 0, dead: 0 };
+    if (isDead(row)) bucket.dead += 1;
+    else bucket.alive += 1;
+    byYear.set(year, bucket);
+  }
+
+  return {
+    dormantDays,
+    totalGroups: rows.length,
+    deadGroups: dead.length,
+    neverActiveGroups: dead.filter((row) => row.messageCount === 0).length,
+    medianAgeDays: ages.length ? Math.round(percentile(ages, 50)) : null,
+    oldestAlive: oldestAliveRow ? toEntry(oldestAliveRow) : null,
+    foundedByYear: [...byYear.values()].sort((a, b) => a.year - b.year),
+    // Groups with no archived message have no history to mourn.
+    graveyard: dead
+      .filter((row) => row.messageCount > 0)
+      .sort((a, b) => b.messageCount - a.messageCount || (b.lastTs ?? 0) - (a.lastTs ?? 0))
+      .slice(0, limit)
+      .map(toEntry),
+  };
+}
+
+interface BuriedChatRow {
+  jid: string;
+  kind: string;
+  name: string | null;
+  recentMessages: number;
+  recentFromMe: number;
+  lastTs: number | null;
+}
+
+/**
+ * Chats you archived that did not stay archived in spirit.
+ *
+ * WhatsApp un-archives a chat when a message lands unless "Keep chats archived"
+ * is on, so on most accounts this list is the set of conversations the user
+ * explicitly asked to stop seeing — and that kept going regardless.
+ */
+export function getArchivedChats(
+  params: { windowDays?: unknown; limit?: unknown },
+  db: Database = getDb(),
+): ArchivedChats {
+  const windowDays = parseLimit(params.windowDays, 30, 3650);
+  const limit = parseLimit(params.limit, 8, 50);
+
+  if (!columnExists(db, 'chats', 'archived')) {
+    return {
+      available: false,
+      windowDays,
+      totalChats: 0,
+      archivedChats: 0,
+      archivedDirect: 0,
+      archivedGroups: 0,
+      stillActiveCount: 0,
+      stillActive: [],
+    };
+  }
+
+  const totals = db.prepare(`
+    SELECT
+      COUNT(*) AS totalChats,
+      COALESCE(SUM(archived <> 0), 0) AS archivedChats,
+      COALESCE(SUM(archived <> 0 AND ${chatKindSql('direct', 'kind')}), 0) AS archivedDirect,
+      COALESCE(SUM(archived <> 0 AND ${chatKindSql('group', 'kind')}), 0) AS archivedGroups
+    FROM chats
+    WHERE ${chatKindSql('all', 'kind')}
+  `).get() as { totalChats: number; archivedChats: number; archivedDirect: number; archivedGroups: number };
+
+  const since = Math.floor(Date.now() / 1000) - windowDays * DAY_SECONDS;
+  const rows = db.prepare(`
+    SELECT
+      chats.jid AS jid,
+      chats.kind AS kind,
+      COALESCE(
+        ${cleanDisplayNameSql('chats.name')},
+        ${cleanDisplayNameSql('MAX(messages.chat_name)')},
+        ${contactDisplayNameSql('chat_contacts')},
+        ${cleanDisplayNameSql('chats.jid')},
+        'Unknown'
+      ) AS name,
+      COUNT(messages.rowid) AS recentMessages,
+      COALESCE(SUM(messages.from_me), 0) AS recentFromMe,
+      MAX(messages.ts) AS lastTs
+    FROM chats
+    JOIN messages ON messages.chat_jid = chats.jid AND messages.ts >= @since
+    ${contactLeftJoins('chat_contacts', 'chats.jid')}
+    WHERE chats.archived <> 0 AND ${chatKindSql('all')}
+    GROUP BY chats.jid
+    ORDER BY recentMessages DESC, lastTs DESC
+  `).all({ since }) as BuriedChatRow[];
+
+  return {
+    available: true,
+    windowDays,
+    ...totals,
+    stillActiveCount: rows.length,
+    stillActive: rows.slice(0, limit).map((row) => ({
+      jid: row.jid,
+      name: row.name ?? row.jid,
+      kind: row.kind === 'group' ? 'group' : 'direct',
+      recentMessages: row.recentMessages,
+      recentFromMe: row.recentFromMe,
+      lastMessageAt: unixSecondsToIso(row.lastTs),
+    })),
+  };
+}
+
 export const statsRouter = Router();
 
 /**
@@ -2206,3 +2493,7 @@ statsRouter.get('/dormancy', cachedStats('dormancy', (query) => getDormancy(quer
 statsRouter.get('/group-profile', cachedStats('group-profile', (query) => getGroupProfile(query)));
 statsRouter.get('/groups', cachedStats('groups', (query) => getGroupDirectory(query)));
 statsRouter.get('/link-intelligence', cachedStats('link-intelligence', (query) => getLinkIntelligence(query)));
+statsRouter.get('/weekly-rhythm', cachedStats('weekly-rhythm', (query) => getWeeklyRhythm(query)));
+statsRouter.get('/distinctive-words', cachedStats('distinctive-words', (query) => getDistinctiveWords(query)));
+statsRouter.get('/group-lifecycle', cachedStats('group-lifecycle', (query) => getGroupLifecycle(query)));
+statsRouter.get('/archived-chats', cachedStats('archived-chats', (query) => getArchivedChats(query)));
