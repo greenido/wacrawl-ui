@@ -5,10 +5,14 @@ import type { OverviewStats } from '../api/client';
 import { ActivityHeatmap } from '../components/charts/ActivityHeatmap';
 import { MessageVolumeArea } from '../components/charts/MessageVolumeArea';
 import { TopContactsBar } from '../components/charts/TopContactsBar';
+import { ArchivedChatsCard } from '../components/reports/ArchivedChatsCard';
 import { ConversationDynamicsSection } from '../components/reports/ConversationDynamicsSection';
+import { DistinctiveWordsCard } from '../components/reports/DistinctiveWordsCard';
 import { DormancyCard } from '../components/reports/DormancyCard';
 import { EmojiAnalyticsCard } from '../components/reports/EmojiAnalyticsCard';
+import { GroupGraveyardCard } from '../components/reports/GroupGraveyardCard';
 import { ReplyLatencyCard } from '../components/reports/ReplyLatencyCard';
+import { WeeklyRhythmCard } from '../components/reports/WeeklyRhythmCard';
 import { WordCloudCard } from '../components/reports/WordCloudCard';
 import { CardTitle, ClickableCard, Skeleton } from '../components/ui/Card';
 import { CompactBarCard, ListCard, ListRow, StatCard } from '../components/ui/cards';
@@ -32,11 +36,15 @@ export function Dashboard() {
   const {
     overview, topContacts, messageVolume, heatmap, hourOfDay, dayOfWeek, mediaBreakdown,
     mediaSenders, sentReceivedRatio, responseTimes, replyLatency, groupActivity, streaks,
-    wordCloud, emojiAnalytics, conversationDynamics, dormancy, heatmapYear,
+    wordCloud, emojiAnalytics, conversationDynamics, dormancy, weeklyRhythm, distinctiveWords,
+    groupLifecycle, archivedChats, heatmapYear,
     loadingOverview, loadingCharts, error,
   } = data;
 
   const openContact = (jid: string) => navigate(`/contacts/${encodeURIComponent(jid)}`);
+  const openGroup = (jid: string) => navigate(`/groups/${encodeURIComponent(jid)}`);
+  const openChat = (jid: string) => navigate(`/chats?contact=${encodeURIComponent(jid)}`);
+  const searchTerm = (term: string) => navigate(`/search?q=${encodeURIComponent(term)}`);
 
   if (error && !overview && topContacts.length === 0 && messageVolume.length === 0) {
     return (
@@ -76,7 +84,9 @@ export function Dashboard() {
           <MessageVolumeArea data={messageVolume} loading={loadingCharts} onDeepDive={() => navigate('/chats')} />
           <TopContactsBar data={topContacts} loading={loadingCharts} onContactClick={openContact} onDeepDive={() => navigate('/people')} />
           <ActivityHeatmap data={heatmap} loading={loadingCharts} year={heatmapYear} onDeepDive={() => navigate(`/years/${heatmapYear}`)} />
+          <WeeklyRhythmCard data={weeklyRhythm} loading={loadingCharts} />
           <DormancyCard data={dormancy} loading={loadingCharts} onOpenContact={openContact} />
+          <ArchivedChatsCard data={archivedChats} loading={loadingCharts} onOpenChat={openChat} />
 
           <ReplyLatencyCard data={replyLatency} loading={loadingCharts} />
           <EmojiAnalyticsCard data={emojiAnalytics} loading={loadingCharts} />
@@ -175,8 +185,11 @@ export function Dashboard() {
             useful={wordCloud}
             loading={loadingCharts}
             period={period}
-            onSelectTerm={(term) => navigate(`/search?q=${encodeURIComponent(term)}`)}
+            onSelectTerm={searchTerm}
           />
+
+          <DistinctiveWordsCard data={distinctiveWords} loading={loadingCharts} onSelectTerm={searchTerm} />
+          <GroupGraveyardCard data={groupLifecycle} loading={loadingCharts} onOpenGroup={openGroup} />
         </section>
 
         <ConversationDynamicsSection data={conversationDynamics} loading={loadingCharts} onOpenContact={openContact} />

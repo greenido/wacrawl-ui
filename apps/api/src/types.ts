@@ -515,3 +515,86 @@ export interface LinkIntelligence {
   uniqueDomains: number;
   scan: ScanCoverage;
 }
+
+export interface WeeklyRhythmCell {
+  /** 0 = Sunday, matching `DayOfWeekStat.day`. */
+  day: number;
+  hour: number;
+  count: number;
+}
+
+export interface WeeklyRhythm {
+  /** All 168 cells, zeros included, ordered by day then hour. */
+  cells: WeeklyRhythmCell[];
+  peak: WeeklyRhythmCell | null;
+  total: number;
+}
+
+export interface DistinctiveTerm {
+  text: string;
+  /** Times you used it. */
+  mine: number;
+  /** Times everyone else used it. */
+  theirs: number;
+  /** Log-odds z-score; positive leans yours, negative leans theirs. */
+  score: number;
+}
+
+export interface DistinctiveWords {
+  mine: DistinctiveTerm[];
+  theirs: DistinctiveTerm[];
+  scan: ScanCoverage;
+}
+
+export interface GroupGraveyardEntry {
+  jid: string;
+  name: string;
+  messageCount: number;
+  createdAt: string | null;
+  lastMessageAt: string | null;
+  /** Null when the archive holds no message and no last-activity stamp for it. */
+  daysSilent: number | null;
+}
+
+export interface GroupFoundingYear {
+  year: number;
+  alive: number;
+  dead: number;
+}
+
+export interface GroupLifecycle {
+  dormantDays: number;
+  totalGroups: number;
+  deadGroups: number;
+  /** Groups the archive holds no message from at all. Counted within `deadGroups`. */
+  neverActiveGroups: number;
+  /** Median age in days of groups with a known creation date. */
+  medianAgeDays: number | null;
+  oldestAlive: GroupGraveyardEntry | null;
+  foundedByYear: GroupFoundingYear[];
+  /** Dead groups that once carried the most traffic. */
+  graveyard: GroupGraveyardEntry[];
+}
+
+export interface BuriedChat {
+  jid: string;
+  name: string;
+  kind: 'direct' | 'group';
+  recentMessages: number;
+  /** How many of `recentMessages` you sent yourself. */
+  recentFromMe: number;
+  lastMessageAt: string | null;
+}
+
+export interface ArchivedChats {
+  /** False when the archive predates the `chats.archived` column. */
+  available: boolean;
+  windowDays: number;
+  totalChats: number;
+  archivedChats: number;
+  archivedDirect: number;
+  archivedGroups: number;
+  /** Archived chats with traffic inside the window. */
+  stillActiveCount: number;
+  stillActive: BuriedChat[];
+}

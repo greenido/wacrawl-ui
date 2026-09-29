@@ -49,6 +49,33 @@ export function hourInTimezone(epochSeconds: number, timeZone: string): number {
   return Math.min(23, Math.max(0, value));
 }
 
+const weekdayHourFormattersCache = new Map<string, Intl.DateTimeFormat>();
+
+const WEEKDAY_INDEX: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+
+/**
+ * Weekday (0 = Sunday) and hour 0–23 for Unix epoch seconds in `timeZone`.
+ *
+ * One formatter call yields both, which matters for the 168-cell rhythm grid:
+ * it reads every message in the period, and two Intl round-trips per row
+ * doubled the cost for no gain.
+ */
+export function weekdayHourInTimezone(epochSeconds: number, timeZone: string): { weekday: number; hour: number } {
+  const date = new Date(epochSeconds * 1000);
+  if (timeZone === 'UTC') {
+    return { weekday: date.getUTCDay(), hour: date.getUTCHours() };
+  }
+  let formatter = weekdayHourFormattersCache.get(timeZone);
+  if (!formatter) {
+    formatter = new Intl.DateTimeFormat('en-US', { timeZone, weekday: 'short', hour: 'numeric', hourCycle: 'h23' });
+    weekdayHourFormattersCache.set(timeZone, formatter);
+  }
+  const parts = formatter.formatToParts(date);
+  const weekday = WEEKDAY_INDEX[parts.find((p) => p.type === 'weekday')?.value ?? ''] ?? 0;
+  const hour = Number(parts.find((p) => p.type === 'hour')?.value);
+  return { weekday, hour: Number.isFinite(hour) ? Math.min(23, Math.max(0, hour)) : 0 };
+}
+
 const dateFormattersCache = new Map<string, Intl.DateTimeFormat>();
 
 function getDateFormatter(timeZone: string): Intl.DateTimeFormat {

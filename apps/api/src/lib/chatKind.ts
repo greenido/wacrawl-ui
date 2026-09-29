@@ -38,3 +38,9 @@ export function tableExists(db: Database, name: string): boolean {
     .get({ name }) as { present: number } | undefined;
   return row !== undefined;
 }
+
+/** Newer wacrawl archives add columns (e.g. `chats.archived`); older ones lack them. */
+export function columnExists(db: Database, table: string, column: string): boolean {
+  const columns = db.prepare(`PRAGMA table_info(${JSON.stringify(table)})`).all() as Array<{ name: string }>;
+  return columns.some((row) => row.name === column);
+}

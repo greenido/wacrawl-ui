@@ -520,6 +520,78 @@ export interface SyncStatusResponse {
   };
 }
 
+export interface WeeklyRhythmCell {
+  /** 0 = Sunday, matching `DayOfWeekStat.day`. */
+  day: number;
+  hour: number;
+  count: number;
+}
+
+export interface WeeklyRhythm {
+  cells: WeeklyRhythmCell[];
+  peak: WeeklyRhythmCell | null;
+  total: number;
+}
+
+export interface DistinctiveTerm {
+  text: string;
+  mine: number;
+  theirs: number;
+  score: number;
+}
+
+export interface DistinctiveWords {
+  mine: DistinctiveTerm[];
+  theirs: DistinctiveTerm[];
+  scan: ScanCoverage;
+}
+
+export interface GroupGraveyardEntry {
+  jid: string;
+  name: string;
+  messageCount: number;
+  createdAt: string | null;
+  lastMessageAt: string | null;
+  daysSilent: number | null;
+}
+
+export interface GroupFoundingYear {
+  year: number;
+  alive: number;
+  dead: number;
+}
+
+export interface GroupLifecycle {
+  dormantDays: number;
+  totalGroups: number;
+  deadGroups: number;
+  neverActiveGroups: number;
+  medianAgeDays: number | null;
+  oldestAlive: GroupGraveyardEntry | null;
+  foundedByYear: GroupFoundingYear[];
+  graveyard: GroupGraveyardEntry[];
+}
+
+export interface BuriedChat {
+  jid: string;
+  name: string;
+  kind: 'direct' | 'group';
+  recentMessages: number;
+  recentFromMe: number;
+  lastMessageAt: string | null;
+}
+
+export interface ArchivedChats {
+  available: boolean;
+  windowDays: number;
+  totalChats: number;
+  archivedChats: number;
+  archivedDirect: number;
+  archivedGroups: number;
+  stillActiveCount: number;
+  stillActive: BuriedChat[];
+}
+
 async function request<T>(path: string, params?: Record<string, string | number | undefined>): Promise<T> {
   const url = new URL(path, API_URL);
   for (const [key, value] of Object.entries(params ?? {})) {
@@ -619,6 +691,13 @@ export const api = {
     request<GroupDirectoryEntry[]>('/api/stats/groups', { sort, limit }),
   dormancy: (limit = 12, kind: 'direct' | 'group' | 'all' = 'direct') =>
     request<DormancyReport>('/api/stats/dormancy', { limit, kind }),
+  weeklyRhythm: (period: Period) =>
+    request<WeeklyRhythm>('/api/stats/weekly-rhythm', { period, timeZone: VIEWER_TIME_ZONE }),
+  distinctiveWords: (period: Period, limit = 12) =>
+    request<DistinctiveWords>('/api/stats/distinctive-words', { period, limit }),
+  groupLifecycle: (limit = 8) =>
+    request<GroupLifecycle>('/api/stats/group-lifecycle', { limit, timeZone: VIEWER_TIME_ZONE }),
+  archivedChats: (limit = 8) => request<ArchivedChats>('/api/stats/archived-chats', { limit }),
   yearInReview: (year: number, limit = 10) =>
     request<YearInReview>('/api/stats/year-in-review', { year, limit, timeZone: VIEWER_TIME_ZONE }),
   groupActivity: (period: Period, limit = 10) => request<GroupActivityStat[]>('/api/stats/group-activity', { period, limit }),
