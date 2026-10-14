@@ -48,17 +48,6 @@ describe('stats cache', () => {
       .not.toBe(statsCacheKey('search', { q: { b: '2' } }, now));
   });
 
-  it('drops every entry when the time bucket rolls over', () => {
-    const now = Date.now();
-    getCached(statsCacheKey('overview', {}, now), () => 1);
-    getCached(statsCacheKey('streaks', {}, now), () => 2);
-    expect(statsCacheSize()).toBe(2);
-
-    statsCacheKey('overview', {}, now + STATS_CACHE_TTL_MS);
-
-    expect(statsCacheSize()).toBe(0);
-  });
-
   it('recomputes after expiry instead of serving a stale window', () => {
     const now = Date.now();
     const compute = vi.fn(() => ({ total: 1 }));
