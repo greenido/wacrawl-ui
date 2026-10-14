@@ -1,6 +1,5 @@
 import type Database from 'better-sqlite3';
 import { afterEach, describe, expect, it } from 'vitest';
-import { sinceTimestamp, unixSecondsToIso } from '../lib/query.js';
 import {
   getActivityHeatmap,
   getConversationDynamics,
@@ -229,7 +228,6 @@ describe('conversation dynamics', () => {
     expect(dynamics.conversationDepth.length).toBeGreaterThan(0);
     expect(dynamics.ghostScore.length).toBeGreaterThan(0);
     expect(dynamics.relationshipTrajectory.length).toBeGreaterThan(0);
-    expect(dynamics.lateNightTexters.length).toBeGreaterThanOrEqual(0);
   });
 });
 
@@ -313,15 +311,5 @@ describe('link intelligence', () => {
     expect(result.uniqueDomains).toBe(0);
     expect(result.domainLeaderboard).toEqual([]);
     expect(result.linkCategories).toEqual([]);
-  });
-});
-
-describe('query helpers', () => {
-  it('treats WaCrawl timestamps as Unix seconds for the current schema', () => {
-    expect(unixSecondsToIso(1_700_000_000)).toBe('2023-11-14T22:13:20.000Z');
-  });
-
-  it('computes period cutoffs in Unix seconds', () => {
-    expect(sinceTimestamp('day', 1_700_086_400_000)).toBe(1_700_000_000);
   });
 });

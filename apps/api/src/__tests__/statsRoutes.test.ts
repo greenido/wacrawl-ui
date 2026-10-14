@@ -4,12 +4,14 @@ import os from 'node:os';
 import path from 'node:path';
 import type { AddressInfo } from 'node:net';
 import type { Server } from 'node:http';
+import Database from 'better-sqlite3';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createTestDb } from './testDb.js';
 
 let server: Server;
 let baseUrl: string;
 let tmpDir: string;
+let dbPath: string;
 
 /** Reserve a free port so the app's own localhost Host allowlist matches. */
 function freePort(): Promise<number> {
@@ -25,7 +27,7 @@ function freePort(): Promise<number> {
 
 beforeAll(async () => {
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'wacrawl-stats-'));
-  const dbPath = path.join(tmpDir, 'archive.db');
+  dbPath = path.join(tmpDir, 'archive.db');
   createTestDb(dbPath).close();
 
   const port = await freePort();
@@ -82,11 +84,29 @@ describe('GET /api/stats/* caching', () => {
     expect(new Set(etags).size).toBe(3);
   });
 
-  it('returns identical payloads on a cache hit', async () => {
-    const first = await fetch(`${baseUrl}/api/stats/top-contacts?period=all&limit=5`);
-    const second = await fetch(`${baseUrl}/api/stats/top-contacts?period=all&limit=5`);
+  it('drops the cached result and the old etag once the archive is re-synced', async () => {
+    const before = await fetch(`${baseUrl}/api/stats/overview`);
+    const staleEtag = before.headers.get('etag')!;
+    await expect(before.json()).resolves.toMatchObject({ totalMessages: 6 });
 
-    expect(first.headers.get('etag')).toBe(second.headers.get('etag'));
-    await expect(second.json()).resolves.toEqual(await first.json());
+    // What `wacrawl sync` does from the server's point of view: another process
+    // writes to the archive file.
+    const writer = new Database(dbPath);
+    writer.prepare(`
+      INSERT INTO messages (source_pk, chat_jid, msg_id, ts, from_me, text, raw_type)
+      VALUES (99, 'alice@s.whatsapp.net', 'synced', 1700500000, 1, 'new after sync', 0)
+    `).run();
+    writer.close();
+    // Pin the mtime forward so the test does not depend on filesystem timestamp resolution.
+    const future = new Date(Date.now() + 60_000);
+    fs.utimesSync(dbPath, future, future);
+
+    const after = await fetch(`${baseUrl}/api/stats/overview`, {
+      headers: { 'If-None-Match': staleEtag },
+    });
+
+    expect(after.status).toBe(200);
+    expect(after.headers.get('etag')).not.toBe(staleEtag);
+    await expect(after.json()).resolves.toMatchObject({ totalMessages: 7 });
   });
 });
