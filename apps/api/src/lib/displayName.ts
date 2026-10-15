@@ -58,3 +58,10 @@ export function contactLeftJoins(alias: string, jidExpression: string): string {
 export function canonicalJidSql(alias: string, expression: string): string {
   return `COALESCE(${alias}_lid.jid, ${alias}_jid.jid, ${expression})`;
 }
+
+/**
+ * True when a JID identifies a person rather than a group or broadcast pseudo-chat.
+ */
+export function isPersonJidSql(expression: string): string {
+  return `${expression} IS NOT NULL AND ${expression} <> '' AND ${expression} NOT LIKE '%@g.us' AND ${expression} NOT LIKE '%@status' AND ${expression} NOT LIKE '%@broadcast'`;
+}

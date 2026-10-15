@@ -598,3 +598,48 @@ export interface ArchivedChats {
   stillActiveCount: number;
   stillActive: BuriedChat[];
 }
+
+export type GroupSort = 'recent' | 'members' | 'messages';
+
+export interface ResolvedArchivePaths {
+  whatsappContainer: string | null;
+  chatDb: string | null;
+  contactsDb: string | null;
+  mediaRoot: string;
+  primaryDb: string;
+}
+
+export interface HealthResponse {
+  ok: boolean;
+  dbPath: string;
+  paths: ResolvedArchivePaths;
+  mediaAccessible: boolean;
+  mediaError: string | null;
+}
+
+export interface PathsSettingsResponse {
+  envDefaults: ResolvedArchivePaths;
+  storedOverride: Partial<Record<keyof ResolvedArchivePaths, string | null>> | null;
+  effective: ResolvedArchivePaths;
+  pathsFile: boolean;
+}
+
+export type SyncState = 'idle' | 'running' | 'succeeded' | 'failed';
+
+export interface SyncJobStatus {
+  state: SyncState;
+  startedAt: string | null;
+  finishedAt: string | null;
+  error: string | null;
+  hint: string | null;
+}
+
+export interface SyncStatusResponse {
+  /** False when the server was started with WACRAWL_DISABLE_SYNC=1. */
+  enabled: boolean;
+  job: SyncJobStatus;
+  archive: {
+    lastImportAt: string | null;
+    sourcePath: string | null;
+  };
+}

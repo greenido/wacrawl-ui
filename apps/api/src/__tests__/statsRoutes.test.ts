@@ -109,4 +109,18 @@ describe('GET /api/stats/* caching', () => {
     expect(after.headers.get('etag')).not.toBe(staleEtag);
     await expect(after.json()).resolves.toMatchObject({ totalMessages: 7 });
   });
+
+  it('returns standardized error envelopes for /api/messages/:id/offset', async () => {
+    const invalidRes = await fetch(`${baseUrl}/api/messages/not-a-number/offset`);
+    expect(invalidRes.status).toBe(400);
+    await expect(invalidRes.json()).resolves.toEqual({
+      error: { code: 'VALIDATION_ERROR', message: 'Invalid message ID.' },
+    });
+
+    const missingRes = await fetch(`${baseUrl}/api/messages/999999/offset`);
+    expect(missingRes.status).toBe(404);
+    await expect(missingRes.json()).resolves.toEqual({
+      error: { code: 'NOT_FOUND', message: 'Message not found.' },
+    });
+  });
 });

@@ -11,4 +11,15 @@ export default defineConfig({
     host: '127.0.0.1',
     port: 4173,
   },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          react: ['react', 'react-dom', 'react-router-dom'],
+          charts: ['recharts'],
+          icons: ['lucide-react'],
+        },
+      },
+    },
+  },
 });

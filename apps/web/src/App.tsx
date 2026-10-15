@@ -37,11 +37,25 @@ export function App() {
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
-      if (event.metaKey && event.key.toLowerCase() === 'k') {
+      const hasCommandModifier = event.metaKey || event.ctrlKey;
+      if (!hasCommandModifier || event.altKey || event.shiftKey) return;
+
+      if (event.key.toLowerCase() === 'k') {
         event.preventDefault();
         navigate('/search');
+        return;
       }
-      if (event.metaKey && shortcutRoutes[event.key]) {
+
+      const target = event.target as HTMLElement | null;
+      const isEditable = Boolean(
+        target && (
+          target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.tagName === 'SELECT' ||
+          target.isContentEditable
+        ),
+      );
+      if (!isEditable && shortcutRoutes[event.key]) {
         event.preventDefault();
         navigate(shortcutRoutes[event.key]);
       }

@@ -43,12 +43,25 @@ export function dashboardPathsFile(): string {
   return path.join(os.homedir(), '.wacrawl', 'dashboard-paths.json');
 }
 
+let cachedOverride: { filePath: string; value: StoredDashboardPaths | null } | null = null;
+
+export function invalidateDashboardPathsCache(): void {
+  cachedOverride = null;
+}
+
 export function readDashboardPathsOverride(): StoredDashboardPaths | null {
+  const filePath = dashboardPathsFile();
+  if (cachedOverride && cachedOverride.filePath === filePath) {
+    return cachedOverride.value;
+  }
   try {
-    const raw = fs.readFileSync(dashboardPathsFile(), 'utf8');
+    const raw = fs.readFileSync(filePath, 'utf8');
     const parsed = JSON.parse(raw) as StoredDashboardPaths;
-    return parsed && typeof parsed === 'object' ? parsed : null;
+    const value = parsed && typeof parsed === 'object' ? parsed : null;
+    cachedOverride = { filePath, value };
+    return value;
   } catch {
+    cachedOverride = { filePath, value: null };
     return null;
   }
 }
@@ -57,14 +70,17 @@ export function writeDashboardPathsOverride(data: StoredDashboardPaths): void {
   const filePath = dashboardPathsFile();
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   fs.writeFileSync(filePath, `${JSON.stringify(data, null, 2)}\n`, 'utf8');
+  cachedOverride = { filePath, value: { ...data } };
 }
 
 export function clearDashboardPathsOverride(): void {
+  const filePath = dashboardPathsFile();
   try {
-    fs.unlinkSync(dashboardPathsFile());
+    fs.unlinkSync(filePath);
   } catch {
     // Missing file is fine.
   }
+  cachedOverride = { filePath, value: null };
 }
 
 export function resolvePathsFromEnv(): ResolvedPaths {

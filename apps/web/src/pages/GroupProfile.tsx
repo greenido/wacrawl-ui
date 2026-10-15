@@ -8,6 +8,7 @@ import { Card, CardTitle, Skeleton } from '../components/ui/Card';
 import { ListCard, ListRow, StatCard } from '../components/ui/cards';
 import { ScanNote } from '../components/ui/ScanNote';
 import { displayNameOrUnknown, formatBytes, formatNumber } from '../lib/utils';
+import { useAppStore } from '../store/appStore';
 
 /** A silent-members list is a signal, not a directory; ten rows carry it. */
 const QUIET_ROWS_SHOWN = 10;
@@ -67,6 +68,7 @@ function ParticipantRow({ name, count, share, isAdmin, isActive }: {
 export function GroupProfile() {
   const { jid = '' } = useParams();
   const navigate = useNavigate();
+  const dataVersion = useAppStore((state) => state.dataVersion);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -91,7 +93,7 @@ export function GroupProfile() {
     return () => {
       active = false;
     };
-  }, [jid]);
+  }, [dataVersion, jid]);
 
   if (error) {
     return (
