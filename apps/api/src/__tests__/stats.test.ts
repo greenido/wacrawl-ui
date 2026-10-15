@@ -1,9 +1,10 @@
 import type Database from 'better-sqlite3';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   getActivityHeatmap,
   getConversationDynamics,
   getDayOfWeekStats,
+  getEmojiAnalytics,
   getGroupActivity,
   getHourOfDayStats,
   getLinkIntelligence,
@@ -12,11 +13,13 @@ import {
   getMessageStreaks,
   getMessageVolume,
   getOverviewStats,
+  getReplyLatency,
   getResponseTimes,
   getSentReceivedRatio,
   getTopContacts,
   getWordCloud,
 } from '../routes/stats.js';
+import { SERVER_TIME_ZONE } from '../lib/timezone.js';
 import { createTestDb } from './testDb.js';
 
 let db: Database.Database | null = null;
@@ -99,7 +102,8 @@ describe('stats queries', () => {
 
     expect(getTopContacts({ period: 'all', limit: '10' }, db).find((contact) => contact.jid === '200000000000002@lid')?.name).toBe('Ada');
     expect(getTopContacts({ period: 'all', limit: '10' }, db).find((contact) => contact.jid === '15550101234@s.whatsapp.net')?.name).toBe('Grace Hopper');
-    expect(getMediaSenders({ period: 'all', limit: '10' }, db).find((sender) => sender.jid === '200000000000001@lid')?.name).toBe('Grace Hopper');
+    expect(getMediaSenders({ period: 'all', limit: '10' }, db).find((sender) => sender.jid === '15550101234@s.whatsapp.net')?.name).toBe('Grace Hopper');
+    expect(getMediaSenders({ period: 'all', limit: '10' }, db).some((sender) => sender.jid === '200000000000001@lid')).toBe(false);
   });
 
   it('merges top contacts that share the same contacts row (jid vs lid)', () => {
@@ -123,6 +127,39 @@ describe('stats queries', () => {
     const merged = getTopContacts({ period: 'all', limit: '20' }, db).find((c) => c.jid === 'merge-test@s.whatsapp.net');
     expect(merged).toMatchObject({ messageCount: 2, sentByMe: 1, sentByThem: 1 });
     expect(getTopContacts({ period: 'all', limit: '20' }, db).some((c) => c.jid === '111222333444@lid')).toBe(false);
+  });
+
+  it('excludes group chats and status broadcast from top contacts and media senders', () => {
+    db = createTestDb();
+    db.prepare('INSERT INTO chats (jid, kind, name, last_message_at) VALUES (?, ?, ?, ?)').run(
+      '0@status',
+      'status',
+      'WhatsApp Status',
+      1_700_500_000,
+    );
+    const insertMessage = db.prepare(`
+      INSERT INTO messages (
+        source_pk, chat_jid, chat_name, msg_id, sender_jid, sender_name, ts,
+        from_me, text, raw_type, message_type, media_type, media_path, media_size
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    insertMessage.run(80, 'family@g.us', 'Family', 'm80', null, null, 1_700_500_000, 1, 'my group photo 🎉', 0, 'image', 'image', '/tmp/group-me.jpg', 200);
+    insertMessage.run(81, '0@status', 'Status', 'm81', null, null, 1_700_500_100, 1, 'my status 🔥', 0, 'image', 'image', '/tmp/status.jpg', 100);
+
+    const contacts = getTopContacts({ period: 'all', limit: '20' }, db);
+    expect(contacts.map((c) => c.jid)).not.toContain('family@g.us');
+    expect(contacts.map((c) => c.jid)).not.toContain('0@status');
+
+    const senders = getMediaSenders({ period: 'all', limit: '20' }, db);
+    expect(senders.map((s) => s.jid)).not.toContain('family@g.us');
+    expect(senders.map((s) => s.jid)).not.toContain('0@status');
+
+    const emojiStats = getEmojiAnalytics({ period: 'all', limit: '20' }, db);
+    expect(emojiStats.topEmojiUsers.map((u) => u.jid)).not.toContain('family@g.us');
+    expect(emojiStats.topEmojiUsers.map((u) => u.jid)).not.toContain('0@status');
+    // Group and status emoji still count toward overall archive emoji totals
+    expect(emojiStats.totalEmojiCount).toBeGreaterThanOrEqual(2);
   });
 
   it('buckets message volume by day', () => {
@@ -152,6 +189,7 @@ describe('stats queries', () => {
 
     expect(getHourOfDayStats({ period: 'all' }, db)[0]).toEqual({ hour: 22, count: 6 });
     expect(getHourOfDayStats({ period: 'all', timeZone: 'America/Los_Angeles' }, db)[0]).toEqual({ hour: 14, count: 6 });
+    expect(getHourOfDayStats({ period: 'all', timeZone: SERVER_TIME_ZONE }, db).reduce((sum, h) => sum + h.count, 0)).toBe(6);
     expect(getDayOfWeekStats({ period: 'all' }, db).find((point) => point.day === 2)).toMatchObject({ day: 2, label: 'Tue', count: 1 });
     expect(getMediaBreakdown({ period: 'all' }, db)).toEqual([
       { mediaType: 'audio', count: 1, totalBytes: 50 },
@@ -300,6 +338,7 @@ describe('link intelligence', () => {
 
     const alice = result.sharingAsymmetry.find((s) => s.jid === 'alice@s.whatsapp.net');
     expect(alice).toMatchObject({ mediaSent: 1, mediaReceived: 1, linksSent: 1, linksReceived: 0 });
+    expect(result.sharingAsymmetry.map((s) => s.jid)).not.toContain('family@g.us');
   });
 
   it('returns empty results when no links exist', () => {
@@ -311,5 +350,30 @@ describe('link intelligence', () => {
     expect(result.uniqueDomains).toBe(0);
     expect(result.domainLeaderboard).toEqual([]);
     expect(result.linkCategories).toEqual([]);
+  });
+
+  it('reuses cached reply gaps across getResponseTimes and getReplyLatency until db changes', () => {
+    db = createTestDb();
+    const prepareSpy = vi.spyOn(db, 'prepare');
+
+    const responseTimes = getResponseTimes({ period: 'all', minResponses: 1 }, db);
+    const replyLatency = getReplyLatency({ period: 'all' }, db);
+
+    const lagWindowCallsBefore = prepareSpy.mock.calls.filter(([sql]) =>
+      String(sql).includes('LAG(ts) OVER (PARTITION BY chat_jid'),
+    );
+    expect(lagWindowCallsBefore).toHaveLength(1);
+    expect(responseTimes.length).toBeGreaterThan(0);
+    expect(replyLatency.mine.count + replyLatency.theirs.count).toBeGreaterThan(0);
+
+    // Mutating the database invalidates the reply-gap cache on the next call
+    db.prepare('UPDATE messages SET ts = ts + 1 WHERE rowid = 1').run();
+
+    getReplyLatency({ period: 'all' }, db);
+    const lagWindowCallsAfter = prepareSpy.mock.calls.filter(([sql]) =>
+      String(sql).includes('LAG(ts) OVER (PARTITION BY chat_jid'),
+    );
+    expect(lagWindowCallsAfter).toHaveLength(2);
+    prepareSpy.mockRestore();
   });
 });
