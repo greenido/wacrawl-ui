@@ -169,4 +169,32 @@ describe('data queries', () => {
     expect(chats.data[0].jid).toBe('alice@s.whatsapp.net');
     expect(chats.pagination.total).toBe(1);
   });
+
+  it('excludes group chats and status from getPeople and merges LID contacts', () => {
+    db = createTestDb();
+    db.prepare('INSERT INTO contacts (jid, full_name, first_name, lid) VALUES (?, ?, ?, ?)').run(
+      'merge-test@s.whatsapp.net',
+      'Merge Person',
+      'Merge',
+      '111222333444@lid',
+    );
+    const insertMessage = db.prepare(`
+      INSERT INTO messages (
+        source_pk, chat_jid, chat_name, msg_id, sender_jid, sender_name, ts,
+        from_me, text, raw_type, message_type, media_type, media_path, media_size
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    insertMessage.run(70, 'family@g.us', 'Family', 'm70', '111222333444@lid', 'IAA=', 1_700_518_400, 0, 'from lid', 0, 'text', null, null, null);
+    insertMessage.run(71, 'merge-test@s.whatsapp.net', 'Merge', 'm71', null, null, 1_700_604_800, 1, 'to phone jid', 0, 'text', null, null, null);
+
+    const people = getPeople({ limit: '50' }, db);
+    expect(people.data.map((p) => p.jid)).not.toContain('family@g.us');
+    expect(people.data.map((p) => p.jid)).not.toContain('111222333444@lid');
+    expect(people.data.find((p) => p.jid === 'merge-test@s.whatsapp.net')).toMatchObject({
+      messageCount: 2,
+      sentByMe: 1,
+      sentByThem: 1,
+    });
+  });
 });

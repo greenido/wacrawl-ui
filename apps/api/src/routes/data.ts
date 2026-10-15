@@ -2,7 +2,7 @@ import { Router } from 'express';
 import type { Database } from 'better-sqlite3';
 import { getDb } from '../db.js';
 import { chatKindSql, parseChatKind } from '../lib/chatKind.js';
-import { cleanDisplayNameSql, contactDisplayNameSql, contactLeftJoins } from '../lib/displayName.js';
+import { canonicalJidSql, cleanDisplayNameSql, contactDisplayNameSql, contactLeftJoins, isPersonJidSql } from '../lib/displayName.js';
 import { resolveArchiveMediaPath } from '../lib/mediaFsPath.js';
 import { parseLimit, parseOffset, unixSecondsToIso } from '../lib/query.js';
 import { hasMessageSearchIndex, MESSAGE_SEARCH_FTS_TABLE } from '../lib/searchIndex.js';
@@ -122,28 +122,31 @@ function formatSearchResults(rows: SearchMessageRow[], query: string, limit: num
 export function getPeople(params: { limit?: unknown; offset?: unknown }, db: Database = getDb()): ListResponse<PersonSummary> {
   const limit = parseLimit(params.limit, 50, 200);
   const offset = parseOffset(params.offset);
+  const rawCounterpartySql = 'CASE WHEN messages.from_me = 1 THEN messages.chat_jid ELSE COALESCE(messages.sender_jid, messages.chat_jid) END';
+
   const total = (db.prepare(`
     SELECT COUNT(*) AS count
     FROM (
-      SELECT CASE WHEN from_me = 1 THEN chat_jid ELSE COALESCE(sender_jid, chat_jid) END AS jid
+      SELECT ${canonicalJidSql('contacts', rawCounterpartySql)} AS jid
       FROM messages
+      ${contactLeftJoins('contacts', rawCounterpartySql)}
       UNION
       SELECT jid FROM contacts
     )
-    WHERE jid IS NOT NULL AND jid <> ''
+    WHERE ${isPersonJidSql('jid')}
   `).get() as CountRow).count;
 
   const rows = db.prepare(`
     WITH normalized_messages AS (
       SELECT
-        CASE WHEN from_me = 1 THEN chat_jid ELSE COALESCE(sender_jid, chat_jid) END AS jid,
+        ${canonicalJidSql('contacts', rawCounterpartySql)} AS jid,
         ${contactDisplayNameSql('contacts')} AS contact_name,
-        ${cleanDisplayNameSql('CASE WHEN from_me = 1 THEN messages.chat_name ELSE messages.sender_name END')} AS message_name,
+        ${cleanDisplayNameSql('CASE WHEN messages.from_me = 1 THEN messages.chat_name ELSE messages.sender_name END')} AS message_name,
         ${cleanDisplayNameSql(`
           COALESCE(
             chats.name,
             CASE
-              WHEN messages.chat_jid = CASE WHEN messages.from_me = 1 THEN messages.chat_jid ELSE COALESCE(messages.sender_jid, messages.chat_jid) END
+              WHEN messages.chat_jid = ${rawCounterpartySql}
               THEN messages.chat_name
               ELSE NULL
             END
@@ -153,8 +156,8 @@ export function getPeople(params: { limit?: unknown; offset?: unknown }, db: Dat
         ts,
         media_type
       FROM messages
-      LEFT JOIN chats ON chats.jid = CASE WHEN messages.from_me = 1 THEN messages.chat_jid ELSE COALESCE(messages.sender_jid, messages.chat_jid) END
-      ${contactLeftJoins('contacts', 'CASE WHEN messages.from_me = 1 THEN messages.chat_jid ELSE COALESCE(messages.sender_jid, messages.chat_jid) END')}
+      LEFT JOIN chats ON chats.jid = ${rawCounterpartySql}
+      ${contactLeftJoins('contacts', rawCounterpartySql)}
     ),
     all_people AS (
       SELECT jid, ${contactDisplayNameSql('contacts', false)} AS contact_name, NULL AS message_name, NULL AS direct_chat_name, NULL AS from_me, NULL AS ts, NULL AS media_type
@@ -171,7 +174,7 @@ export function getPeople(params: { limit?: unknown; offset?: unknown }, db: Dat
       SUM(CASE WHEN from_me = 0 THEN 1 ELSE 0 END) AS sentByThem,
       MAX(ts) AS lastMessageTs
     FROM all_people
-    WHERE jid IS NOT NULL AND jid <> ''
+    WHERE ${isPersonJidSql('jid')}
     GROUP BY jid
     ORDER BY messageCount DESC, name COLLATE NOCASE ASC
     LIMIT @limit OFFSET @offset
@@ -521,13 +524,13 @@ dataRouter.get('/search', (req, res) => {
 dataRouter.get('/messages/:id/offset', (req, res) => {
   const id = Number(req.params.id);
   if (isNaN(id)) {
-    res.status(400).json({ error: 'Invalid message ID' });
+    res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'Invalid message ID.' } });
     return;
   }
   const db = getDb();
   const msg = db.prepare('SELECT chat_jid, ts FROM messages WHERE rowid = ?').get(id) as { chat_jid: string; ts: number } | undefined;
   if (!msg) {
-    res.status(404).json({ error: 'Message not found' });
+    res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Message not found.' } });
     return;
   }
   const countRow = db.prepare(`

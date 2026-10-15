@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { api, type PersonSummary } from '../api/client';
 import { Card, Skeleton } from '../components/ui/Card';
 import { formatDateTime, formatNumber, isLidIdentifier } from '../lib/utils';
@@ -49,7 +50,11 @@ export function People() {
         ) : (
           <div className="divide-y divide-slate-100 dark:divide-slate-800">
             {people.map((person) => (
-              <article key={person.jid} className="grid grid-cols-[1fr_auto] gap-4 p-5">
+              <Link
+                key={person.jid}
+                to={`/contacts/${encodeURIComponent(person.jid)}`}
+                className="grid grid-cols-[1fr_auto] gap-4 p-5 transition hover:bg-slate-50 dark:hover:bg-slate-800/40"
+              >
                 <div>
                   <h3 className="font-semibold text-slate-950 dark:text-slate-50">{person.name}</h3>
                   {!isLidIdentifier(person.jid) ? <p className="text-sm text-slate-500">{person.jid}</p> : null}
@@ -61,7 +66,7 @@ export function People() {
                   <Metric label="Sent" value={formatNumber(person.sentByMe)} />
                   <Metric label="Received" value={formatNumber(person.sentByThem)} />
                 </div>
-              </article>
+              </Link>
             ))}
           </div>
         )}

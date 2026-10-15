@@ -25,11 +25,33 @@ export const PERIOD_OPTIONS: Array<{ value: Period; label: string }> = [
   { value: 'all', label: 'All' },
 ];
 
+const THEME_STORAGE_KEY = 'wacrawl:theme';
+
+function resolveInitialTheme(): Theme {
+  if (typeof window === 'undefined') return 'light';
+  try {
+    const stored = window.localStorage.getItem(THEME_STORAGE_KEY);
+    if (stored === 'dark' || stored === 'light') return stored;
+  } catch {
+    // Storage may be unavailable in private browsing contexts.
+  }
+  return window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+}
+
 export const useAppStore = create<AppState>((set) => ({
   period: 'year',
-  theme: 'light',
+  theme: resolveInitialTheme(),
   dataVersion: 0,
   setPeriod: (period) => set({ period }),
-  toggleTheme: () => set((state) => ({ theme: state.theme === 'light' ? 'dark' : 'light' })),
+  toggleTheme: () =>
+    set((state) => {
+      const next: Theme = state.theme === 'light' ? 'dark' : 'light';
+      try {
+        window.localStorage.setItem(THEME_STORAGE_KEY, next);
+      } catch {
+        // Ignore storage write errors in restricted contexts.
+      }
+      return { theme: next };
+    }),
   invalidateData: () => set((state) => ({ dataVersion: state.dataVersion + 1 })),
 }));
