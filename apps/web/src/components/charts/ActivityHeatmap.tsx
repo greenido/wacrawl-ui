@@ -1,14 +1,18 @@
 import { eachDayOfInterval, endOfYear, format, getDay, parseISO, startOfYear } from 'date-fns';
-import { useRef, useState } from 'react';
+import { useRef, useState, type MouseEvent } from 'react';
+import { Link } from 'react-router-dom';
 import type { ActivityHeatmapPoint } from '../../api/client';
 import { cn } from '../../lib/utils';
-import { Card, CardTitle, ClickableCard, Skeleton } from '../ui/Card';
+import { Card, CardTitle, Skeleton } from '../ui/Card';
 
 interface ActivityHeatmapProps {
   data: ActivityHeatmapPoint[];
   loading: boolean;
   year: number;
-  onDeepDive?: () => void;
+  /** Where a day with messages links to. */
+  dayPath?: (date: string) => string;
+  /** The year's own page, linked from the card header. */
+  yearPath?: string;
 }
 
 type HeatmapCell =
@@ -25,7 +29,7 @@ function intensityClass(count: number): string {
 
 type HoverTip = { x: number; y: number; date: string; count: number };
 
-export function ActivityHeatmap({ data, loading, year, onDeepDive }: ActivityHeatmapProps) {
+export function ActivityHeatmap({ data, loading, year, dayPath, yearPath }: ActivityHeatmapProps) {
   const [hoverTip, setHoverTip] = useState<HoverTip | null>(null);
   const heatmapRef = useRef<HTMLDivElement | null>(null);
   const counts = new Map(data.map((point) => [point.date, point.count]));
@@ -43,12 +47,33 @@ export function ActivityHeatmap({ data, loading, year, onDeepDive }: ActivityHea
     };
   })];
 
-  const content = (
-    <>
+  function showTip(event: MouseEvent<HTMLElement>, date: string, count: number) {
+    const cellRect = event.currentTarget.getBoundingClientRect();
+    const heatmapRect = heatmapRef.current?.getBoundingClientRect();
+    if (!heatmapRect) return;
+
+    setHoverTip({
+      x: cellRect.left - heatmapRect.left + cellRect.width / 2,
+      y: cellRect.top - heatmapRect.top,
+      date,
+      count,
+    });
+  }
+
+  return (
+    <Card className="col-span-2">
       <div className="mb-4 flex items-center justify-between">
         <div>
           <CardTitle>Activity Heatmap</CardTitle>
-          <p className="text-sm text-slate-500">Daily message count for {year}</p>
+          <p className="text-sm text-slate-500">
+            Daily message count for {year}{dayPath ? ' — click a day to see its messages' : ''}
+            {yearPath ? (
+              <>
+                {' · '}
+                <Link to={yearPath} className="font-medium text-brand-600 underline-offset-2 hover:underline dark:text-brand-500">Year in review</Link>
+              </>
+            ) : null}
+          </p>
         </div>
         <div className="flex items-center gap-1 text-xs text-slate-500">
           Less
@@ -65,32 +90,36 @@ export function ActivityHeatmap({ data, loading, year, onDeepDive }: ActivityHea
       ) : (
         <div ref={heatmapRef} className="relative overflow-x-auto rounded-xl bg-slate-50 p-4 dark:bg-slate-950/40">
           <div className="grid grid-flow-col grid-rows-7 gap-1">
-            {cells.map((cell) =>
-              cell.date ? (
-                <div
-                  key={cell.key}
-                  className="h-3 w-3"
-                  onMouseEnter={(e) => {
-                    const cellRect = e.currentTarget.getBoundingClientRect();
-                    const heatmapRect = heatmapRef.current?.getBoundingClientRect();
-                    if (!heatmapRect) return;
+            {cells.map((cell) => {
+              if (!cell.date) return <div key={cell.key} className="h-3 w-3 bg-transparent" />;
 
-                    setHoverTip({
-                      x: cellRect.left - heatmapRect.left + cellRect.width / 2,
-                      y: cellRect.top - heatmapRect.top,
-                      date: cell.date,
-                      count: cell.count,
-                    });
-                  }}
-                  onMouseLeave={() => setHoverTip(null)}
-                  aria-label={`${format(parseISO(cell.date), 'MMMM d, yyyy')}: ${cell.count} ${cell.count === 1 ? 'message' : 'messages'}`}
+              const label = `${format(parseISO(cell.date), 'MMMM d, yyyy')}: ${cell.count} ${cell.count === 1 ? 'message' : 'messages'}`;
+              const swatch = <div className={cn('h-3 w-3 rounded-sm', intensityClass(cell.count))} />;
+              const hoverProps = {
+                onMouseEnter: (event: MouseEvent<HTMLElement>) => showTip(event, cell.date, cell.count),
+                onMouseLeave: () => setHoverTip(null),
+              };
+
+              // Out of the tab order: a year of cells would be hundreds of stops
+              // before the next card. The Search page's date filters reach the
+              // same messages by keyboard.
+              return dayPath && cell.count > 0 ? (
+                <Link
+                  key={cell.key}
+                  to={dayPath(cell.date)}
+                  tabIndex={-1}
+                  aria-label={label}
+                  className="block h-3 w-3 rounded-sm hover:ring-2 hover:ring-slate-500"
+                  {...hoverProps}
                 >
-                  <div className={cn('h-3 w-3 rounded-sm', intensityClass(cell.count))} />
-                </div>
+                  {swatch}
+                </Link>
               ) : (
-                <div key={cell.key} className="h-3 w-3 bg-transparent" />
-              ),
-            )}
+                <div key={cell.key} className="h-3 w-3" aria-label={label} {...hoverProps}>
+                  {swatch}
+                </div>
+              );
+            })}
           </div>
           {hoverTip ? (
             <div
@@ -106,16 +135,6 @@ export function ActivityHeatmap({ data, loading, year, onDeepDive }: ActivityHea
           ) : null}
         </div>
       )}
-    </>
+    </Card>
   );
-
-  if (onDeepDive) {
-    return (
-      <ClickableCard className="col-span-2" onActivate={onDeepDive} aria-label="Open activity heatmap deep dive">
-        {content}
-      </ClickableCard>
-    );
-  }
-
-  return <Card className="col-span-2">{content}</Card>;
 }

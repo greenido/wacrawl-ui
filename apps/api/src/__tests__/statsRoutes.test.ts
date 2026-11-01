@@ -49,6 +49,24 @@ afterAll(async () => {
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
+describe('GET /api/search', () => {
+  it('answers a filter-only query', async () => {
+    const response = await fetch(`${baseUrl}/api/search?chat=${encodeURIComponent('family@g.us')}&limit=1`);
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({ pagination: { limit: 1, total: 3 } });
+  });
+
+  it('reports a bad filter as a 400 the page can show', async () => {
+    const response = await fetch(`${baseUrl}/api/search?from=not-a-date`);
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: { code: 'VALIDATION_ERROR', message: 'from must be a date in YYYY-MM-DD form.' },
+    });
+  });
+});
+
 describe('GET /api/stats/* caching', () => {
   it('serves stats with a strong etag and a revalidating cache policy', async () => {
     const response = await fetch(`${baseUrl}/api/stats/overview`);

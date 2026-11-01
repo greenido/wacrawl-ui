@@ -4,7 +4,8 @@ import { getDb } from '../db.js';
 import { chatKindSql, parseChatKind } from '../lib/chatKind.js';
 import { canonicalJidSql, cleanDisplayNameSql, contactDisplayNameSql, contactLeftJoins, isPersonJidSql } from '../lib/displayName.js';
 import { resolveArchiveMediaPath } from '../lib/mediaFsPath.js';
-import { parseLimit, parseOffset, unixSecondsToIso } from '../lib/query.js';
+import { nameLikePattern, parseLimit, parseOffset, unixSecondsToIso } from '../lib/query.js';
+import { parseSearchFilters, type SearchFilterParams } from '../lib/searchFilters.js';
 import { hasMessageSearchIndex, MESSAGE_SEARCH_FTS_TABLE } from '../lib/searchIndex.js';
 import type { ChatSummary, ListResponse, MediaItem, MessageSummary, PersonSummary, SearchResult } from '../types.js';
 
@@ -86,10 +87,6 @@ function mapMessage(row: MessageRow): MessageSummary {
   };
 }
 
-function escapeLike(value: string): string {
-  return value.replace(/[\\%_]/g, (match) => `\\${match}`);
-}
-
 function buildFtsQuery(query: string): string | null {
   const terms = query
     .toLowerCase()
@@ -107,7 +104,9 @@ function buildFtsQuery(query: string): string | null {
 function formatSearchResults(rows: SearchMessageRow[], query: string, limit: number, offset: number, total: number): ListResponse<SearchResult> {
   return asPagination(rows.map((row) => {
     const message = mapMessage(row);
-    const text = row.text ?? row.chatName ?? '';
+    // With no query there is nothing a chat name could be explaining, so a
+    // caption-less photo stays caption-less instead of showing the chat's name.
+    const text = row.text ?? (query ? row.chatName : null) ?? '';
     const ftsSnippet = row.snippet?.trim();
     const snippetSource = ftsSnippet || (text.toLowerCase().includes(query.toLowerCase())
       ? text
@@ -119,24 +118,14 @@ function formatSearchResults(rows: SearchMessageRow[], query: string, limit: num
   }), limit, offset, total);
 }
 
-export function getPeople(params: { limit?: unknown; offset?: unknown }, db: Database = getDb()): ListResponse<PersonSummary> {
+export function getPeople(params: { limit?: unknown; offset?: unknown; q?: unknown; jid?: unknown }, db: Database = getDb()): ListResponse<PersonSummary> {
   const limit = parseLimit(params.limit, 50, 200);
   const offset = parseOffset(params.offset);
+  const like = nameLikePattern(params.q);
+  const targetJid = typeof params.jid === 'string' && params.jid.trim() ? params.jid.trim() : undefined;
   const rawCounterpartySql = 'CASE WHEN messages.from_me = 1 THEN messages.chat_jid ELSE COALESCE(messages.sender_jid, messages.chat_jid) END';
 
-  const total = (db.prepare(`
-    SELECT COUNT(*) AS count
-    FROM (
-      SELECT ${canonicalJidSql('contacts', rawCounterpartySql)} AS jid
-      FROM messages
-      ${contactLeftJoins('contacts', rawCounterpartySql)}
-      UNION
-      SELECT jid FROM contacts
-    )
-    WHERE ${isPersonJidSql('jid')}
-  `).get() as CountRow).count;
-
-  const rows = db.prepare(`
+  const peopleSql = `
     WITH normalized_messages AS (
       SELECT
         ${canonicalJidSql('contacts', rawCounterpartySql)} AS jid,
@@ -174,11 +163,36 @@ export function getPeople(params: { limit?: unknown; offset?: unknown }, db: Dat
       SUM(CASE WHEN from_me = 0 THEN 1 ELSE 0 END) AS sentByThem,
       MAX(ts) AS lastMessageTs
     FROM all_people
-    WHERE ${isPersonJidSql('jid')}
+    WHERE ${isPersonJidSql('jid')} ${targetJid ? 'AND jid = @targetJid' : ''}
     GROUP BY jid
+    ${like ? `
+      HAVING name LIKE @like ESCAPE '\\'
+        OR SUM(CASE WHEN contact_name LIKE @like ESCAPE '\\'
+          OR message_name LIKE @like ESCAPE '\\'
+          OR direct_chat_name LIKE @like ESCAPE '\\' THEN 1 ELSE 0 END) > 0
+    ` : ''}
+  `;
+
+  // The unfiltered count needs no names, which makes it much cheaper than the page.
+  const total = (like || targetJid
+    ? db.prepare(`SELECT COUNT(*) AS count FROM (${peopleSql})`).get({ like, targetJid })
+    : db.prepare(`
+      SELECT COUNT(*) AS count
+      FROM (
+        SELECT ${canonicalJidSql('contacts', rawCounterpartySql)} AS jid
+        FROM messages
+        ${contactLeftJoins('contacts', rawCounterpartySql)}
+        UNION
+        SELECT jid FROM contacts
+      )
+      WHERE ${isPersonJidSql('jid')}
+    `).get()) as CountRow;
+
+  const rows = db.prepare(`
+    ${peopleSql}
     ORDER BY messageCount DESC, name COLLATE NOCASE ASC
     LIMIT @limit OFFSET @offset
-  `).all({ limit, offset }) as PersonRow[];
+  `).all({ limit, offset, like, targetJid }) as PersonRow[];
 
   return asPagination(rows.map((row) => ({
     jid: row.jid,
@@ -188,17 +202,42 @@ export function getPeople(params: { limit?: unknown; offset?: unknown }, db: Dat
     sentByMe: row.sentByMe ?? 0,
     sentByThem: row.sentByThem ?? 0,
     lastMessageAt: unixSecondsToIso(row.lastMessageTs),
-  })), limit, offset, total);
+  })), limit, offset, total.count);
 }
 
-export function getChats(params: { limit?: unknown; offset?: unknown; kind?: unknown; jid?: unknown }, db: Database = getDb()): ListResponse<ChatSummary> {
+/**
+ * A chat matches on the name the list shows or on its contact's own name, which
+ * the list hides whenever the chat carries a name of its own.
+ */
+function chatNameMatchSql(): string {
+  return `
+    (
+      COALESCE(
+        ${cleanDisplayNameSql('chats.name')},
+        (SELECT ${cleanDisplayNameSql('MAX(chat_name)')} FROM messages WHERE chat_jid = chats.jid),
+        ${cleanDisplayNameSql('chats.jid')}
+      ) LIKE @like ESCAPE '\\'
+      OR EXISTS (
+        SELECT 1
+        FROM contacts AS named_contact
+        WHERE (named_contact.jid = chats.jid OR named_contact.lid = chats.jid)
+          AND ${contactDisplayNameSql('named_contact', false)} LIKE @like ESCAPE '\\'
+      )
+    )
+  `;
+}
+
+export function getChats(params: { limit?: unknown; offset?: unknown; kind?: unknown; jid?: unknown; q?: unknown }, db: Database = getDb()): ListResponse<ChatSummary> {
   const limit = parseLimit(params.limit, 50, 200);
   const offset = parseOffset(params.offset);
   const kind = parseChatKind(params.kind);
   const targetJid = typeof params.jid === 'string' && params.jid.trim() ? params.jid.trim() : undefined;
+  const like = nameLikePattern(params.q);
 
-  const where = targetJid ? 'WHERE chats.jid = @targetJid' : `WHERE ${chatKindSql(kind)}`;
-  const total = (db.prepare(`SELECT COUNT(*) AS count FROM chats ${where}`).get({ targetJid }) as CountRow).count;
+  const where = targetJid
+    ? 'WHERE chats.jid = @targetJid'
+    : `WHERE ${chatKindSql(kind)} ${like ? `AND ${chatNameMatchSql()}` : ''}`;
+  const total = (db.prepare(`SELECT COUNT(*) AS count FROM chats ${where}`).get({ targetJid, like }) as CountRow).count;
 
   const rows = db.prepare(`
     WITH chat_page AS (
@@ -251,7 +290,7 @@ export function getChats(params: { limit?: unknown; offset?: unknown; kind?: unk
     LEFT JOIN latest ON latest.chat_jid = chat_page.jid
     ${contactLeftJoins('chat_contacts', 'chat_page.jid')}
     ORDER BY COALESCE(message_stats.lastMessageTs, chat_page.last_message_at, 0) DESC, name COLLATE NOCASE ASC
-  `).all({ limit, offset, targetJid }) as ChatRow[];
+  `).all({ limit, offset, targetJid, like }) as ChatRow[];
 
   return asPagination(rows.map((row) => ({
     jid: row.jid,
@@ -344,12 +383,53 @@ export function getMediaItems(params: { limit?: unknown; offset?: unknown; type?
   })), limit, offset, total);
 }
 
-export function searchMessages(params: { q?: unknown; limit?: unknown; offset?: unknown }, db: Database = getDb()): ListResponse<SearchResult> {
+const SEARCH_COLUMNS_SQL = `
+  messages.rowid AS id,
+  msg_id AS msgId,
+  chat_jid AS chatJid,
+  COALESCE(${cleanDisplayNameSql('chats.name')}, ${cleanDisplayNameSql('messages.chat_name')}, ${contactDisplayNameSql('chat_contacts')}, ${cleanDisplayNameSql('messages.chat_jid')}, 'Unknown') AS chatName,
+  sender_jid AS senderJid,
+  COALESCE(${cleanDisplayNameSql('messages.sender_name')}, ${contactDisplayNameSql('sender_contacts')}) AS senderName,
+  ts,
+  from_me AS fromMe,
+  text,
+  message_type AS messageType,
+  media_type AS mediaType,
+  media_path AS mediaPath
+`;
+
+const SEARCH_JOINS_SQL = `
+  LEFT JOIN chats ON chats.jid = messages.chat_jid
+  ${contactLeftJoins('chat_contacts', 'messages.chat_jid')}
+  ${contactLeftJoins('sender_contacts', 'messages.sender_jid')}
+`;
+
+export function searchMessages(params: SearchFilterParams & { q?: unknown; limit?: unknown; offset?: unknown }, db: Database = getDb()): ListResponse<SearchResult> {
   const query = typeof params.q === 'string' ? params.q.trim() : '';
   const limit = parseLimit(params.limit, 50, 100);
   const offset = parseOffset(params.offset);
-  if (query.length < 2) {
+  const { conditions, bindings } = parseSearchFilters(params, db);
+
+  // A filter is a question in its own right, so only an unfiltered search needs
+  // enough of a query to be worth running.
+  if (conditions.length === 0 && query.length < 2) {
     return asPagination([], limit, offset, 0);
+  }
+
+  const andFilters = conditions.map((condition) => `AND (${condition})`).join('\n');
+
+  if (!query) {
+    const total = (db.prepare(`SELECT COUNT(*) AS count FROM messages WHERE 1 = 1 ${andFilters}`).get(bindings) as CountRow).count;
+    const rows = db.prepare(`
+      SELECT ${SEARCH_COLUMNS_SQL}
+      FROM messages
+      ${SEARCH_JOINS_SQL}
+      WHERE 1 = 1 ${andFilters}
+      ORDER BY ts DESC, messages.rowid DESC
+      LIMIT @limit OFFSET @offset
+    `).all({ ...bindings, limit, offset }) as SearchMessageRow[];
+
+    return formatSearchResults(rows, query, limit, offset, total);
   }
 
   const ftsQuery = buildFtsQuery(query);
@@ -358,8 +438,9 @@ export function searchMessages(params: { q?: unknown; limit?: unknown; offset?: 
       const total = (db.prepare(`
         SELECT COUNT(*) AS count
         FROM ${MESSAGE_SEARCH_FTS_TABLE}
-        WHERE ${MESSAGE_SEARCH_FTS_TABLE} MATCH @ftsQuery
-      `).get({ ftsQuery }) as CountRow).count;
+        JOIN messages ON messages.rowid = ${MESSAGE_SEARCH_FTS_TABLE}.rowid
+        WHERE ${MESSAGE_SEARCH_FTS_TABLE} MATCH @ftsQuery ${andFilters}
+      `).get({ ...bindings, ftsQuery }) as CountRow).count;
       const rows = db.prepare(`
         WITH matched AS (
           SELECT
@@ -369,27 +450,15 @@ export function searchMessages(params: { q?: unknown; limit?: unknown; offset?: 
           WHERE ${MESSAGE_SEARCH_FTS_TABLE} MATCH @ftsQuery
         )
         SELECT
-          messages.rowid AS id,
-          msg_id AS msgId,
-          chat_jid AS chatJid,
-          COALESCE(${cleanDisplayNameSql('chats.name')}, ${cleanDisplayNameSql('messages.chat_name')}, ${contactDisplayNameSql('chat_contacts')}, ${cleanDisplayNameSql('messages.chat_jid')}, 'Unknown') AS chatName,
-          sender_jid AS senderJid,
-          COALESCE(${cleanDisplayNameSql('messages.sender_name')}, ${contactDisplayNameSql('sender_contacts')}) AS senderName,
-          ts,
-          from_me AS fromMe,
-          text,
-          message_type AS messageType,
-          media_type AS mediaType,
-          media_path AS mediaPath,
+          ${SEARCH_COLUMNS_SQL},
           matched.snippet AS snippet
         FROM matched
         JOIN messages ON messages.rowid = matched.rowid
-        LEFT JOIN chats ON chats.jid = messages.chat_jid
-        ${contactLeftJoins('chat_contacts', 'messages.chat_jid')}
-        ${contactLeftJoins('sender_contacts', 'messages.sender_jid')}
+        ${SEARCH_JOINS_SQL}
+        WHERE 1 = 1 ${andFilters}
         ORDER BY ts DESC, messages.rowid DESC
         LIMIT @limit OFFSET @offset
-      `).all({ ftsQuery, limit, offset }) as SearchMessageRow[];
+      `).all({ ...bindings, ftsQuery, limit, offset }) as SearchMessageRow[];
 
       return formatSearchResults(rows, query, limit, offset, total);
     } catch {
@@ -397,7 +466,7 @@ export function searchMessages(params: { q?: unknown; limit?: unknown; offset?: 
     }
   }
 
-  const like = `%${escapeLike(query)}%`;
+  const like = nameLikePattern(query);
   const where = `
     (messages.text LIKE @like ESCAPE '\\'
       OR messages.chat_name LIKE @like ESCAPE '\\'
@@ -405,37 +474,22 @@ export function searchMessages(params: { q?: unknown; limit?: unknown; offset?: 
       OR chats.name LIKE @like ESCAPE '\\'
       OR ${contactDisplayNameSql('chat_contacts')} LIKE @like ESCAPE '\\'
       OR ${contactDisplayNameSql('sender_contacts')} LIKE @like ESCAPE '\\')
+    ${andFilters}
   `;
   const total = (db.prepare(`
     SELECT COUNT(*) AS count
     FROM messages
-    LEFT JOIN chats ON chats.jid = messages.chat_jid
-    ${contactLeftJoins('chat_contacts', 'messages.chat_jid')}
-    ${contactLeftJoins('sender_contacts', 'messages.sender_jid')}
+    ${SEARCH_JOINS_SQL}
     WHERE ${where}
-  `).get({ like }) as CountRow).count;
+  `).get({ ...bindings, like }) as CountRow).count;
   const rows = db.prepare(`
-    SELECT
-      messages.rowid AS id,
-      msg_id AS msgId,
-      chat_jid AS chatJid,
-      COALESCE(${cleanDisplayNameSql('chats.name')}, ${cleanDisplayNameSql('messages.chat_name')}, ${contactDisplayNameSql('chat_contacts')}, ${cleanDisplayNameSql('messages.chat_jid')}, 'Unknown') AS chatName,
-      sender_jid AS senderJid,
-      COALESCE(${cleanDisplayNameSql('messages.sender_name')}, ${contactDisplayNameSql('sender_contacts')}) AS senderName,
-      ts,
-      from_me AS fromMe,
-      text,
-      message_type AS messageType,
-      media_type AS mediaType,
-      media_path AS mediaPath
+    SELECT ${SEARCH_COLUMNS_SQL}
     FROM messages
-    LEFT JOIN chats ON chats.jid = messages.chat_jid
-    ${contactLeftJoins('chat_contacts', 'messages.chat_jid')}
-    ${contactLeftJoins('sender_contacts', 'messages.sender_jid')}
+    ${SEARCH_JOINS_SQL}
     WHERE ${where}
     ORDER BY ts DESC, messages.rowid DESC
     LIMIT @limit OFFSET @offset
-  `).all({ like, limit, offset }) as SearchMessageRow[];
+  `).all({ ...bindings, like, limit, offset }) as SearchMessageRow[];
 
   return formatSearchResults(rows, query, limit, offset, total);
 }

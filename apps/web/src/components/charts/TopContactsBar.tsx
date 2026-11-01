@@ -1,7 +1,8 @@
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import type { TopContact } from '../../api/client';
 import { formatNumber } from '../../lib/utils';
-import { Card, CardTitle, ClickableCard, Skeleton } from '../ui/Card';
+import { Card, CardTitle, Skeleton } from '../ui/Card';
+import { clickedRow } from './chartClick';
 
 type TopContactChartRow = TopContact & { phone?: string | null; shortName: string };
 type TopContactTooltipPayload = ReadonlyArray<{ payload?: unknown }>;
@@ -27,31 +28,19 @@ interface TopContactsBarProps {
   data: TopContact[];
   loading: boolean;
   onContactClick?: (jid: string) => void;
-  onDeepDive?: () => void;
 }
 
-function stopPropagation(event: unknown) {
-  if (
-    event &&
-    typeof event === 'object' &&
-    'stopPropagation' in event &&
-    typeof event.stopPropagation === 'function'
-  ) {
-    event.stopPropagation();
-  }
-}
-
-export function TopContactsBar({ data, loading, onContactClick, onDeepDive }: TopContactsBarProps) {
+export function TopContactsBar({ data, loading, onContactClick }: TopContactsBarProps) {
   const chartData = data.map((contact) => ({
     ...contact,
     shortName: contact.name.length > 24 ? `${contact.name.slice(0, 24)}...` : contact.name,
   }));
 
-  const content = (
-    <>
+  return (
+    <Card className="col-span-2">
       <div className="mb-4">
         <CardTitle>Top Contacts</CardTitle>
-        <p className="text-sm text-slate-500">Most active conversations — click a contact to see all chats</p>
+        <p className="text-sm text-slate-500">Most active conversations — click a contact to see your messages in this period</p>
       </div>
       {loading ? (
         <Skeleton className="h-80" />
@@ -62,7 +51,17 @@ export function TopContactsBar({ data, loading, onContactClick, onDeepDive }: To
       ) : (
         <div className="h-80">
           <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={chartData} layout="vertical" margin={{ left: 12, right: 24, top: 0, bottom: 0 }}>
+            <BarChart
+              data={chartData}
+              layout="vertical"
+              margin={{ left: 12, right: 24, top: 0, bottom: 0 }}
+              style={onContactClick ? { cursor: 'pointer' } : undefined}
+              onClick={(state) => {
+                // On the chart, not the bar, so a contact with a stub of a bar is still clickable.
+                const contact = clickedRow(chartData, state);
+                if (contact && onContactClick) onContactClick(contact.jid);
+              }}
+            >
               <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" horizontal={false} />
               <XAxis type="number" tick={{ fontSize: 12 }} tickLine={false} axisLine={false} />
               <YAxis dataKey="shortName" type="category" tick={{ fontSize: 13 }} tickLine={false} axisLine={false} width={160} />
@@ -77,27 +76,11 @@ export function TopContactsBar({ data, loading, onContactClick, onDeepDive }: To
                 name="Messages"
                 fill="#22c55e"
                 radius={[0, 8, 8, 0]}
-                cursor={onContactClick ? 'pointer' : undefined}
-                onClick={(entry, _index, event) => {
-                  stopPropagation(event);
-                  const jid = (entry as { payload?: Partial<TopContact> }).payload?.jid;
-                  if (onContactClick && jid) onContactClick(jid);
-                }}
               />
             </BarChart>
           </ResponsiveContainer>
         </div>
       )}
-    </>
+    </Card>
   );
-
-  if (onDeepDive) {
-    return (
-      <ClickableCard className="col-span-2" onActivate={onDeepDive} aria-label="Open top contacts deep dive">
-        {content}
-      </ClickableCard>
-    );
-  }
-
-  return <Card className="col-span-2">{content}</Card>;
 }

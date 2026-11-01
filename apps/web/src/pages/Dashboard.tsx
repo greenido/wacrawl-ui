@@ -1,8 +1,9 @@
 import { format } from 'date-fns';
 import { CartesianGrid, Line, LineChart, Tooltip, XAxis, YAxis } from 'recharts';
 import { Link, useNavigate } from 'react-router-dom';
-import type { OverviewStats } from '../api/client';
+import { defaultVolumeGranularity, type OverviewStats } from '../api/client';
 import { ActivityHeatmap } from '../components/charts/ActivityHeatmap';
+import { clickedRow } from '../components/charts/chartClick';
 import { MessageVolumeArea } from '../components/charts/MessageVolumeArea';
 import { TopContactsBar } from '../components/charts/TopContactsBar';
 import { ArchivedChatsCard } from '../components/reports/ArchivedChatsCard';
@@ -14,10 +15,11 @@ import { GroupGraveyardCard } from '../components/reports/GroupGraveyardCard';
 import { ReplyLatencyCard } from '../components/reports/ReplyLatencyCard';
 import { WeeklyRhythmCard } from '../components/reports/WeeklyRhythmCard';
 import { WordCloudCard } from '../components/reports/WordCloudCard';
-import { CardTitle, ClickableCard, Skeleton } from '../components/ui/Card';
+import { Card, CardTitle, Skeleton } from '../components/ui/Card';
 import { CompactBarCard, ListCard, ListRow, StatCard } from '../components/ui/cards';
 import { QuotesLoader } from '../components/ui/QuotesLoader';
 import { useDashboardData } from '../hooks/useDashboardData';
+import { bucketRange, searchPath } from '../lib/searchLinks';
 import { formatBytes, formatDuration, formatNumber } from '../lib/utils';
 import { useAppStore } from '../store/appStore';
 
@@ -44,7 +46,10 @@ export function Dashboard() {
   const openContact = (jid: string) => navigate(`/contacts/${encodeURIComponent(jid)}`);
   const openGroup = (jid: string) => navigate(`/groups/${encodeURIComponent(jid)}`);
   const openChat = (jid: string) => navigate(`/chats?contact=${encodeURIComponent(jid)}`);
-  const searchTerm = (term: string) => navigate(`/search?q=${encodeURIComponent(term)}`);
+  const searchTerm = (term: string) => navigate(searchPath({ q: term, period }));
+  // Every report below is scoped to the period, so the messages behind it are too.
+  const messagesPath = (filters: Parameters<typeof searchPath>[0]) => searchPath({ ...filters, period });
+  const openBucket = (date: string, granularity: 'day' | 'month') => navigate(messagesPath(bucketRange(date, granularity)));
 
   if (error && !overview && topContacts.length === 0 && messageVolume.length === 0) {
     return (
@@ -81,10 +86,29 @@ export function Dashboard() {
         ) : null}
 
         <section className="grid grid-cols-2 gap-6">
-          <MessageVolumeArea data={messageVolume} loading={loadingCharts} onDeepDive={() => navigate('/chats')} />
-          <TopContactsBar data={topContacts} loading={loadingCharts} onContactClick={openContact} onDeepDive={() => navigate('/people')} />
-          <ActivityHeatmap data={heatmap} loading={loadingCharts} year={heatmapYear} onDeepDive={() => navigate(`/years/${heatmapYear}`)} />
-          <WeeklyRhythmCard data={weeklyRhythm} loading={loadingCharts} />
+          <MessageVolumeArea
+            data={messageVolume}
+            loading={loadingCharts}
+            onSelectDate={(date) => openBucket(date, defaultVolumeGranularity(period))}
+          />
+          <TopContactsBar
+            data={topContacts}
+            loading={loadingCharts}
+            onContactClick={(jid) => navigate(messagesPath({ contact: jid }))}
+          />
+          {/* The heatmap is the calendar year whatever the period says, so its days are not scoped to it. */}
+          <ActivityHeatmap
+            data={heatmap}
+            loading={loadingCharts}
+            year={heatmapYear}
+            dayPath={(date) => searchPath({ from: date, to: date })}
+            yearPath={`/years/${heatmapYear}`}
+          />
+          <WeeklyRhythmCard
+            data={weeklyRhythm}
+            loading={loadingCharts}
+            slotPath={(weekday, hour) => messagesPath({ weekday, hour })}
+          />
           <DormancyCard data={dormancy} loading={loadingCharts} onOpenContact={openContact} />
           <ArchivedChatsCard data={archivedChats} loading={loadingCharts} onOpenChat={openChat} />
 
@@ -93,26 +117,39 @@ export function Dashboard() {
 
           <CompactBarCard
             title="Hour of Day"
+            hint="Click a bar to see the messages sent in that hour"
             data={hourOfDay.map((point) => ({ ...point, label: `${point.hour}:00` }))}
             dataKey="count"
             nameKey="label"
             loading={loadingCharts}
-            onDeepDive={() => navigate('/chats')}
+            onSelectRow={(row) => navigate(messagesPath({ hour: row.hour }))}
           />
           <CompactBarCard
             title="Day of Week"
-            data={dayOfWeek.map((point) => ({ label: point.label, count: point.count }))}
+            hint="Click a bar to see the messages sent on that day"
+            data={dayOfWeek}
             dataKey="count"
             nameKey="label"
             loading={loadingCharts}
-            onDeepDive={() => navigate('/chats')}
+            onSelectRow={(row) => navigate(messagesPath({ weekday: row.day }))}
           />
 
-          <ClickableCard className="dark:border-slate-800 dark:bg-slate-900" onActivate={() => navigate('/chats')} aria-label="Open sent vs received ratio deep dive">
+          <Card className="dark:border-slate-800 dark:bg-slate-900">
             <CardTitle className="dark:text-slate-50">Monthly Sent vs Received Ratio</CardTitle>
+            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Click a month to see its messages</p>
             {loadingCharts ? <Skeleton className="mt-4 h-64" /> : (
               <div className="mt-4 h-64 overflow-x-auto">
-                <LineChart width={640} height={256} data={sentReceivedRatio} margin={{ left: 0, right: 12, top: 12, bottom: 0 }}>
+                <LineChart
+                  width={640}
+                  height={256}
+                  data={sentReceivedRatio}
+                  margin={{ left: 0, right: 12, top: 12, bottom: 0 }}
+                  style={{ cursor: 'pointer' }}
+                  onClick={(state) => {
+                    const point = clickedRow(sentReceivedRatio, state);
+                    if (point) openBucket(point.month, 'month');
+                  }}
+                >
                   <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
                   <XAxis dataKey="month" tick={{ fontSize: 12 }} tickLine={false} axisLine={false} minTickGap={24} />
                   <YAxis tick={{ fontSize: 12 }} tickLine={false} axisLine={false} width={36} />
@@ -123,21 +160,27 @@ export function Dashboard() {
                 </LineChart>
               </div>
             )}
-          </ClickableCard>
+          </Card>
 
-          <ListCard title="Media Breakdown" onDeepDive={() => navigate('/media')}>
+          <ListCard title="Media Breakdown">
             {mediaBreakdown.map((item) => (
               <ListRow
                 key={item.mediaType}
+                to={messagesPath({ mediaType: item.mediaType })}
                 label={<span className="capitalize">{item.mediaType}</span>}
                 value={`${formatNumber(item.count)} · ${formatBytes(item.totalBytes)}`}
               />
             ))}
           </ListCard>
 
-          <ListCard title="Media Senders" onDeepDive={() => navigate('/media')}>
+          <ListCard title="Media Senders">
             {mediaSenders.map((sender) => (
-              <ListRow key={sender.jid} label={sender.name} value={`${formatNumber(sender.mediaCount)} files`} />
+              <ListRow
+                key={sender.jid}
+                to={messagesPath({ contact: sender.jid, mediaType: 'any' })}
+                label={sender.name}
+                value={`${formatNumber(sender.mediaCount)} files`}
+              />
             ))}
           </ListCard>
 
@@ -156,25 +199,28 @@ export function Dashboard() {
             ))}
           </ListCard>
 
-          <ListCard title="Group Activity" onDeepDive={() => navigate('/groups')}>
+          <ListCard title="Group Activity">
             {groupActivity.map((item) => (
               <ListRow
                 key={item.jid}
                 label={
-                  <Link
-                    to={`/groups/${encodeURIComponent(item.jid)}`}
-                    onClick={(event) => event.stopPropagation()}
-                    className="underline-offset-2 hover:underline"
-                  >
+                  <Link to={`/groups/${encodeURIComponent(item.jid)}`} className="underline-offset-2 hover:underline">
                     {item.name}
                   </Link>
                 }
-                value={`${formatNumber(item.messageCount)} messages · ${item.participantCount} talking`}
+                value={
+                  <>
+                    <Link to={messagesPath({ chat: item.jid })} className="underline-offset-2 hover:underline">
+                      {formatNumber(item.messageCount)} messages
+                    </Link>
+                    {` · ${item.participantCount} talking`}
+                  </>
+                }
               />
             ))}
           </ListCard>
 
-          <ListCard title="Streaks" onDeepDive={() => navigate('/chats')}>
+          <ListCard title="Streaks">
             <div className="grid grid-cols-2 gap-3">
               <StatCard label="Current" value={`${streaks?.currentStreak ?? 0} days`} loading={loadingCharts} />
               <StatCard label="Longest" value={`${streaks?.longestStreak ?? 0} days`} loading={loadingCharts} />

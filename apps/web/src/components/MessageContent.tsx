@@ -7,6 +7,7 @@ import {
   resolveMediaPreviewKind,
   type MediaPreviewKind,
 } from '../lib/messageMedia';
+import { Highlight } from './ui/Highlight';
 import { MediaPlaceholder, useMediaError } from './ui/MediaPlaceholder';
 
 const URL_SPLIT_RE = /(https?:\/\/[^\s]+)/gi;
@@ -21,13 +22,13 @@ function splitUrlTail(url: string): { href: string; tail: string } {
   return { href, tail };
 }
 
-export function TextWithLinks({ text, className }: { text: string; className?: string }) {
+export function TextWithLinks({ text, className, terms = [] }: { text: string; className?: string; terms?: string[] }) {
   const parts = text.split(URL_SPLIT_RE);
   return (
     <span className={className}>
       {parts.map((part, index) => {
         if (!/^https?:\/\//i.test(part)) {
-          return part;
+          return <Highlight key={index} text={part} terms={terms} />;
         }
         const { href, tail } = splitUrlTail(part);
         return (
@@ -38,7 +39,7 @@ export function TextWithLinks({ text, className }: { text: string; className?: s
               rel="noopener noreferrer"
               className="font-medium text-brand-600 underline decoration-brand-600/40 underline-offset-2 hover:text-brand-700 dark:text-brand-400 dark:hover:text-brand-300"
             >
-              {href}
+              <Highlight text={href} terms={terms} />
             </a>
             {tail}
           </span>

@@ -4,16 +4,31 @@ import { api, type ChatSummary, type MessageSummary } from '../api/client';
 import { MessageContent } from '../components/MessageContent';
 import { Card, Skeleton } from '../components/ui/Card';
 import { CopyButton } from '../components/ui/CopyButton';
+import { FilterInput } from '../components/ui/FilterInput';
+import { useUrlTextFilter } from '../hooks/useUrlTextFilter';
 import { chatPreviewLine, messageClipboardText } from '../lib/messageMedia';
 import { cn } from '../lib/utils';
 import { displayNameOrUnknown, formatDateTime, formatNumber, isLidIdentifier } from '../lib/utils';
 import { useAppStore } from '../store/appStore';
+
+const KIND_FILTERS: Array<{ value: 'direct' | 'group' | undefined; label: string }> = [
+  { value: undefined, label: 'All' },
+  { value: 'direct', label: 'Direct' },
+  { value: 'group', label: 'Groups' },
+];
+
+function parseKind(value: string | null): 'direct' | 'group' | undefined {
+  return value === 'direct' || value === 'group' ? value : undefined;
+}
 
 export function Chats() {
   const dataVersion = useAppStore((state) => state.dataVersion);
   const [searchParams, setSearchParams] = useSearchParams();
   const contactJid = searchParams.get('contact');
   const targetMsgId = searchParams.get('msg') ? Number(searchParams.get('msg')) : null;
+  const kind = parseKind(searchParams.get('kind'));
+  const { value: filter, setValue: setFilter, applied: appliedFilter } = useUrlTextFilter();
+  const listFiltered = Boolean(kind || appliedFilter);
 
   const [chats, setChats] = useState<ChatSummary[]>([]);
   const [totalChats, setTotalChats] = useState(0);
@@ -36,6 +51,13 @@ export function Chats() {
     selectedJidRef.current = selected?.jid ?? null;
   }, [selected]);
 
+  // Tells a "load more" still in flight that the list it belongs to has gone.
+  const listKey = `${kind ?? ''}|${appliedFilter}`;
+  const listKeyRef = useRef(listKey);
+  useEffect(() => {
+    listKeyRef.current = listKey;
+  }, [listKey]);
+
   useEffect(() => {
     let active = true;
     setLoadingChats(true);
@@ -52,26 +74,27 @@ export function Chats() {
           }
         }
 
-        const listRes = await api.chats(50, 0);
+        const listRes = await api.chats(50, 0, kind, undefined, appliedFilter);
         if (!active) return;
 
-        let mergedChats = [...listRes.data];
+        // A deep link's chat tops the list, unless the list is deliberately narrowed.
+        const pinTarget = targetChat && !listFiltered && !listRes.data.some((c) => c.jid === targetChat!.jid);
+        const mergedChats = pinTarget ? [targetChat!, ...listRes.data] : listRes.data;
         if (targetChat) {
-          const exists = listRes.data.some((c) => c.jid === targetChat!.jid);
-          if (!exists) {
-            mergedChats = [targetChat, ...mergedChats];
-          }
           setSelected(targetChat);
-        } else if (openJid) {
-          // A refresh should not throw the reader back to the top of the list.
-          // The chat object is always a fresh one, so the message pane reloads.
-          setSelected(mergedChats.find((chat) => chat.jid === openJid) ?? mergedChats[0] ?? null);
         } else {
-          setSelected(listRes.data[0] ?? null);
+          // Filtering must not swap out the conversation being read, nor should a
+          // refresh throw the reader back to the top of the list. So an open chat
+          // stays open, even when the filter hides its row.
+          setSelected((open) => {
+            const refreshed = mergedChats.find((chat) => chat.jid === openJid);
+            if (refreshed) return refreshed;
+            return open && listFiltered ? open : mergedChats[0] ?? null;
+          });
         }
 
         setChats(mergedChats);
-        setTotalChats(listRes.pagination.total + (targetChat && !listRes.data.some((c) => c.jid === targetChat!.jid) ? 1 : 0));
+        setTotalChats(listRes.pagination.total + (pinTarget ? 1 : 0));
       } catch (err) {
         if (active) setError(err instanceof Error ? err.message : String(err));
       } finally {
@@ -84,10 +107,12 @@ export function Chats() {
     return () => {
       active = false;
     };
-  }, [contactJid, dataVersion]);
+  }, [appliedFilter, contactJid, dataVersion, kind, listFiltered]);
+
+  const selectedJid = selected?.jid ?? null;
 
   useEffect(() => {
-    if (!selected) {
+    if (!selectedJid) {
       setMessages([]);
       setTotalMessages(0);
       setMessagesOffset(0);
@@ -102,7 +127,7 @@ export function Chats() {
         if (targetMsgId) {
           try {
             const offsetRes = await api.messageOffset(targetMsgId);
-            if (offsetRes.chatJid === selected.jid) {
+            if (offsetRes.chatJid === selectedJid) {
               queryOffset = Math.max(0, offsetRes.offset - 20);
             }
           } catch (e) {
@@ -110,7 +135,7 @@ export function Chats() {
           }
         }
 
-        const result = await api.chatMessages(selected.jid, 50, queryOffset);
+        const result = await api.chatMessages(selectedJid, 50, queryOffset);
         if (!active) return;
 
         setMessages(result.data);
@@ -142,13 +167,17 @@ export function Chats() {
     return () => {
       active = false;
     };
-  }, [selected, targetMsgId]);
+    // Keyed on the JID so that refiltering the list leaves an open chat alone; a
+    // real refresh is dataVersion's job.
+  }, [dataVersion, selectedJid, targetMsgId]);
 
   const loadMoreChats = () => {
     if (loadingMoreChats || chats.length >= totalChats) return;
     setLoadingMoreChats(true);
-    api.chats(50, chats.length)
+    const requestedFor = listKey;
+    api.chats(50, chats.length, kind, undefined, appliedFilter)
       .then((result) => {
+        if (listKeyRef.current !== requestedFor) return;
         setChats((prev) => {
           const existingJids = new Set(prev.map((c) => c.jid));
           const newChats = result.data.filter((c) => !existingJids.has(c.jid));
@@ -204,11 +233,44 @@ export function Chats() {
           className="max-h-[calc(100vh-180px)] overflow-y-auto p-0 dark:border-slate-800 dark:bg-slate-900"
           onScroll={handleSidebarScroll}
         >
+          <div className="sticky top-0 z-10 space-y-2 border-b border-slate-100 bg-white p-3 dark:border-slate-800 dark:bg-slate-900">
+            <FilterInput value={filter} onChange={setFilter} placeholder="Filter by name" />
+            <div className="flex items-center gap-1">
+              {KIND_FILTERS.map((option) => (
+                <button
+                  key={option.label}
+                  type="button"
+                  aria-pressed={kind === option.value}
+                  onClick={() => setSearchParams((previous) => {
+                    const next = new URLSearchParams(previous);
+                    if (option.value) next.set('kind', option.value);
+                    else next.delete('kind');
+                    return next;
+                  }, { replace: true })}
+                  className={cn(
+                    'rounded-full px-3 py-1 text-xs font-semibold transition',
+                    kind === option.value
+                      ? 'bg-brand-600 text-white dark:bg-brand-500'
+                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-200',
+                  )}
+                >
+                  {option.label}
+                </button>
+              ))}
+              {loadingChats ? null : (
+                <span className="ml-auto text-xs text-slate-500 dark:text-slate-400">{formatNumber(totalChats)} {totalChats === 1 ? 'chat' : 'chats'}</span>
+              )}
+            </div>
+          </div>
           {loadingChats ? (
             <div className="space-y-3 p-5">
               <Skeleton className="h-16" />
               <Skeleton className="h-16" />
               <Skeleton className="h-16" />
+            </div>
+          ) : chats.length === 0 ? (
+            <div className="p-8 text-center text-sm text-slate-500">
+              {listFiltered ? 'No chats match this filter.' : 'No chats in this archive.'}
             </div>
           ) : (
             <div className="divide-y divide-slate-100 dark:divide-slate-800">
@@ -218,7 +280,14 @@ export function Chats() {
                   type="button"
                   onClick={() => {
                     setSelected(chat);
-                    if (contactJid || targetMsgId) setSearchParams({}, { replace: true });
+                    if (contactJid || targetMsgId) {
+                      setSearchParams((previous) => {
+                        const next = new URLSearchParams(previous);
+                        next.delete('contact');
+                        next.delete('msg');
+                        return next;
+                      }, { replace: true });
+                    }
                   }}
                   className={cn(
                     'block w-full p-4 text-left transition hover:bg-slate-50 dark:hover:bg-slate-800',

@@ -74,6 +74,13 @@ export const errorHandler: ErrorRequestHandler = (error, _req, res, next) => {
     return;
   }
 
+  if (error?.code === 'VALIDATION_ERROR') {
+    res.status(400).json({
+      error: { code: 'VALIDATION_ERROR', message: error.message ?? 'Invalid request.' },
+    });
+    return;
+  }
+
   const code = error?.code === 'SQLITE_CANTOPEN' ? 'DATABASE_UNAVAILABLE' : 'INTERNAL_ERROR';
   const message = code === 'DATABASE_UNAVAILABLE'
     ? 'Cannot open the WaCrawl database. Check Settings → Archive paths, WACRAWL_DB in .env, or run wacrawl sync.'

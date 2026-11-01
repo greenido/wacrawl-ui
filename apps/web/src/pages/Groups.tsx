@@ -3,6 +3,8 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api, type GroupDirectoryEntry, type GroupSort } from '../api/client';
 import { Card, Skeleton } from '../components/ui/Card';
+import { FilterInput } from '../components/ui/FilterInput';
+import { useUrlTextFilter } from '../hooks/useUrlTextFilter';
 import { cn, formatDateTime, formatNumber } from '../lib/utils';
 import { useAppStore } from '../store/appStore';
 
@@ -15,6 +17,7 @@ const SORTS: Array<{ value: GroupSort; label: string }> = [
 export function Groups() {
   const dataVersion = useAppStore((state) => state.dataVersion);
   const [sort, setSort] = useState<GroupSort>('recent');
+  const { value: filter, setValue: setFilter, applied: appliedFilter } = useUrlTextFilter();
   const [groups, setGroups] = useState<GroupDirectoryEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -24,7 +27,7 @@ export function Groups() {
     setLoading(true);
     setError(null);
 
-    api.groups(sort)
+    api.groups(sort, undefined, appliedFilter)
       .then((result) => {
         if (active) setGroups(result);
       })
@@ -38,7 +41,7 @@ export function Groups() {
     return () => {
       active = false;
     };
-  }, [dataVersion, sort]);
+  }, [appliedFilter, dataVersion, sort]);
 
   return (
     <main className="space-y-6 p-8">
@@ -49,7 +52,8 @@ export function Groups() {
             Every group in the archive, with the roster size the chat list cannot show.
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <FilterInput value={filter} onChange={setFilter} placeholder="Filter by name" className="w-56" />
           {SORTS.map((option) => (
             <button
               key={option.value}
@@ -76,7 +80,9 @@ export function Groups() {
             {[0, 1, 2, 3, 4].map((i) => <Skeleton key={i} className="h-12" />)}
           </div>
         ) : groups.length === 0 ? (
-          <div className="p-10 text-center text-slate-500">No groups in this archive.</div>
+          <div className="p-10 text-center text-slate-500">
+            {appliedFilter ? `No groups match “${appliedFilter}”.` : 'No groups in this archive.'}
+          </div>
         ) : (
           <div className="divide-y divide-slate-100 dark:divide-slate-800">
             {groups.map((group) => (
