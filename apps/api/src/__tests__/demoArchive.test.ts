@@ -72,7 +72,8 @@ describe('generateDemoArchive', () => {
 
     expect(fingerprint(first.dbPath)).toBe(fingerprint(second.dbPath));
     expect(fingerprint(first.dbPath)).not.toBe(fingerprint(other.dbPath));
-  });
+    // Three full archives overran the default 5s on Node 20 in CI.
+  }, 30_000);
 
   it('never places a message after its own "now"', () => {
     const dated = generateDemoArchive({ dir: path.join(tmpDir, 'dated'), now: FIXED_NOW });
