@@ -26,6 +26,7 @@
   },
   "files": [
     "apps/api/dist",
+    "apps/api/package.json",
     "apps/web/dist",
     "bin"
   ],
@@ -38,10 +39,15 @@
     "build": "npm run build -w @wacrawl/api && npm run build -w @wacrawl/web",
     "test": "npm run test -w @wacrawl/api",
     "preview": "npm run preview -w @wacrawl/web",
-    "typecheck": "npm run typecheck -w @wacrawl/api && npm run typecheck -w @wacrawl/web",
+    "typecheck": "npm run typecheck -w @wacrawl/api && npm run typecheck -w @wacrawl/web && tsc -p e2e/tsconfig.json",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "verify": "npm run lint && npm run typecheck && npm test",
+    "verify:full": "npm run verify && npm run build && npm run test:e2e && npm run test:fresh-install",
+    "demo": "node bin/wacrawl-dashboard.js --demo",
+    "test:e2e": "playwright test --project=smoke",
+    "test:fresh-install": "node e2e/fresh-install.mjs",
+    "docs:screenshots": "playwright test --project=screenshots",
     "prepublishOnly": "npm run verify && npm run build",
     "publish:verify-auth": "npm whoami",
     "publish:npm": "npm run publish:verify-auth && npm publish --access public"
@@ -59,6 +65,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@playwright/test": "^1.64.1",
     "concurrently": "^9.2.1",
     "eslint": "^10.8.0",
     "eslint-plugin-react-hooks": "^7.1.1",

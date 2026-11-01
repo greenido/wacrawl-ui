@@ -42,7 +42,10 @@ import type {
 
 export type * from '../../../api/src/types';
 
-const API_URL = import.meta.env.VITE_API_URL ?? 'http://127.0.0.1:3001';
+// In production the API serves this bundle, so it is wherever the page came from.
+// Baking in :3001 left the whole UI talking to the wrong server under PORT=….
+const API_URL = import.meta.env.VITE_API_URL
+  ?? (import.meta.env.DEV ? 'http://127.0.0.1:3001' : window.location.origin);
 
 export class ApiClientError extends Error {
   constructor(message: string, public status?: number) {

@@ -10,6 +10,15 @@ jobs:
   build:
     runs-on: ubuntu-latest
 
+    strategy:
+      # `engines` promises >=20 and better-sqlite3 is a native module, so a
+      # failure on one version says nothing about the others. See them all.
+      fail-fast: false
+      matrix:
+        node-version: [20, 22, 24]
+
+    name: build (Node ${{ matrix.node-version }})
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -17,7 +26,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: ${{ matrix.node-version }}
           cache: npm
 
       - name: Install dependencies
@@ -34,3 +43,21 @@ jobs:
 
       - name: Build
         run: npm run build
+
+      - name: Install browser
+        run: npx playwright install --with-deps --only-shell chromium
+
+      - name: Smoke tests
+        run: npm run test:e2e
+
+      - name: Fresh install
+        run: npm run test:fresh-install
+
+      # Traces only ever hold the demo archive's invented data.
+      - name: Upload Playwright traces
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-traces-node-${{ matrix.node-version }}
+          path: test-results/
+          retention-days: 7

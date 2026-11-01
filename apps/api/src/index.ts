@@ -3,6 +3,7 @@ import 'dotenv/config';
 import express, { type ErrorRequestHandler } from 'express';
 import { ensurePrimaryDatabase } from './db.js';
 import { isMediaRootAccessible } from './lib/mediaFsPath.js';
+import { resolvePathsFromEnv } from './pathsResolve.js';
 import { dataRouter } from './routes/data.js';
 import { settingsRouter } from './routes/settings.js';
 import { statsRouter } from './routes/stats.js';
@@ -139,6 +140,9 @@ export function createApp(): express.Express {
 
     res.json({
       ok: primaryDbReadable,
+      // Settings can repoint a running demo at another archive, and a badge
+      // calling real messages "demo data" would be worse than no badge.
+      demo: process.env.WACRAWL_DEMO === '1' && paths.primaryDb === resolvePathsFromEnv().primaryDb,
       dbPath: paths.primaryDb,
       paths,
       mediaAccessible: mediaStatus.accessible,
@@ -181,7 +185,14 @@ export function createApp(): express.Express {
 }
 
 if (process.env.NODE_ENV !== 'test') {
-  createApp().listen(PORT, HOST, () => {
+  createApp().listen(PORT, HOST, (error) => {
+    // Express 5 reports a failed bind here rather than throwing. Ignoring it let
+    // the process announce itself and exit, leaving whatever already held the
+    // port answering in its place — on `--demo`, possibly a real archive.
+    if (error) {
+      console.error(`WaCrawl API could not listen on http://${HOST}:${PORT}: ${error.message}`);
+      process.exit(1);
+    }
     console.info(`WaCrawl API listening on http://${HOST}:${PORT}`);
   });
 }
