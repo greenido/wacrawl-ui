@@ -1,6 +1,6 @@
 import type { NextFunction, Request, Response } from 'express';
-import { describe, expect, it, vi } from 'vitest';
-import { errorHandler, isLoopbackOrigin } from '../index.js';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { errorHandler, isLoopbackOrigin, reportListenResult } from '../index.js';
 import { isClientDisconnect } from '../routes/data.js';
 
 function fakeResponse(headersSent: boolean) {
@@ -48,6 +48,44 @@ describe('isLoopbackOrigin', () => {
     expect(isLoopbackOrigin('file:///etc/passwd')).toBe(false);
     expect(isLoopbackOrigin('null')).toBe(false);
     expect(isLoopbackOrigin('')).toBe(false);
+  });
+});
+
+describe('reportListenResult', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    process.exitCode = undefined;
+  });
+
+  it('fails loudly when the port is taken', () => {
+    // Express 5 hands listen errors to this callback. Ignoring the argument
+    // printed "listening" and exited 0 when a second copy was started.
+    const info = vi.spyOn(console, 'info').mockImplementation(() => {});
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    reportListenResult(Object.assign(new Error('listen EADDRINUSE'), { code: 'EADDRINUSE' }));
+
+    expect(info).not.toHaveBeenCalled();
+    expect(error).toHaveBeenCalledWith(expect.stringContaining('already in use'));
+    expect(process.exitCode).toBe(1);
+  });
+
+  it('reports any other listen failure with its own message', () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    reportListenResult(Object.assign(new Error('listen EACCES'), { code: 'EACCES' }));
+
+    expect(error).toHaveBeenCalledWith(expect.stringContaining('listen EACCES'));
+    expect(process.exitCode).toBe(1);
+  });
+
+  it('announces a successful start', () => {
+    const info = vi.spyOn(console, 'info').mockImplementation(() => {});
+
+    reportListenResult();
+
+    expect(info).toHaveBeenCalledWith(expect.stringContaining('listening'));
+    expect(process.exitCode).toBeUndefined();
   });
 });
 

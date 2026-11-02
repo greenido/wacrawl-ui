@@ -10,7 +10,8 @@ export default defineConfig({
   preview: {
     host: '127.0.0.1',
     port: 4173,
-    // A preview build calls its own origin, and the API only answers to its own Host.
+    // Production builds call their own origin. changeOrigin keeps the Host header
+    // on the API's allowlist.
     proxy: {
       '/api': { target: 'http://127.0.0.1:3001', changeOrigin: true },
     },

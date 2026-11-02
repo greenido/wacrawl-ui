@@ -66,6 +66,36 @@ export function resolveArchiveMediaPath(storedPath: string): string {
   return resolved;
 }
 
+/** Types a browser only displays. SVG is left out: opened directly, it can run script. */
+const INLINE_MEDIA_EXTENSIONS = new Set([
+  '.jpg', '.jpeg', '.png', '.gif', '.webp', '.heic', '.heif',
+  '.mp4', '.mov', '.webm', '.m4v', '.3gp',
+  '.ogg', '.oga', '.opus', '.mp3', '.m4a', '.aac', '.wav',
+  '.pdf',
+]);
+
+/**
+ * Attachments are written by whoever sent them but served from the same origin as
+ * the API, so an HTML file opened as a page could read the whole archive. Anything
+ * not on the list downloads instead. The sandbox gives a page an opaque origin as
+ * a second line of defence. <img> and <video> ignore both headers, so thumbnails
+ * of unlisted types still render.
+ */
+export function mediaResponseHeaders(filePath: string): Record<string, string> {
+  const extension = path.extname(filePath).toLowerCase();
+  const headers: Record<string, string> = { 'X-Content-Type-Options': 'nosniff' };
+
+  // Browser PDF viewers refuse to load in a sandboxed document, and script inside
+  // a PDF has no access to the origin.
+  if (extension !== '.pdf') {
+    headers['Content-Security-Policy'] = 'sandbox';
+  }
+  if (!INLINE_MEDIA_EXTENSIONS.has(extension)) {
+    headers['Content-Disposition'] = `attachment; filename*=UTF-8''${encodeURIComponent(path.basename(filePath))}`;
+  }
+  return headers;
+}
+
 /** Check whether the configured media root is readable. */
 export function isMediaRootAccessible(): { accessible: boolean; error?: string } {
   const root = getArchiveMediaRoot();

@@ -150,7 +150,8 @@ Also: **dark and light themes** (toggle in the top bar), and a **welcome/help mo
 
 We've taken more care with this than your group chat takes with spoilers.
 
-- The API listens on **`127.0.0.1` only**. Host and CORS checks allow local dev and preview origins only.
+- The API listens on **`127.0.0.1` only**. When it serves the dashboard itself (`npx wacrawl-dashboard`), only that dashboard's own origin may call it, so a site on another local port can't read your archive. Under `npm run dev` and `npm run preview`, any loopback origin is allowed, because the UI comes from Vite on a port that can move.
+- **Attachments can't run in the dashboard.** Photos, video, audio and PDFs open in the browser. Anything else, including HTML and SVG, downloads instead, because anyone can send you a file and the API serves it from the same origin as your archive.
 - The archive is opened **read-only**. `/api/health` reports whether the DB is readable and which paths it resolved.
 - `POST /api/sync` is the only route that starts a process, so it requires an **`X-Wacrawl-Request: 1`** header. CORS stops a cross-origin page from *reading* a response, but not from *sending* a simple POST. A non-simple header forces a preflight, and the origin check rejects it. The CLI is spawned without a shell and with a fixed argument list.
 - Set `WACRAWL_DISABLE_SYNC=1` and the API never spawns anything at all.
@@ -221,8 +222,8 @@ Copy `apps/api/.env.example` to `apps/api/.env` (and optionally `apps/web/.env.e
 | `WACRAWL_BIN` | Path to the `wacrawl` executable if it's not on `PATH` |
 | `WACRAWL_DISABLE_SYNC` | Set to `1` and Refresh only reloads data. It never spawns `wacrawl sync` |
 | `WACRAWL_DEMO` | Set by `--demo`; turns on the **Demo data** badge. You shouldn't need to set it yourself |
-| `PORT` | API port. Default: `3001` |
-| `VITE_API_URL` (web) | API base URL. Default: the page's own origin in a build, `http://127.0.0.1:3001` under `npm run dev` |
+| `PORT` | API port. Default: `3001`. `npm run dev` and `npm run preview` expect `3001`; for another port under dev, also set `VITE_API_URL` |
+| `VITE_API_URL` (web) | API base URL. Default: `http://127.0.0.1:3001` under `npm run dev`, the page's own origin in a production build. A value set at build time is baked in |
 
 You can also change paths from **Settings** (**Meta+8**) instead of editing files.
 
