@@ -3,7 +3,7 @@ import { getDb } from '../../db.js';
 import { tableExists } from '../../lib/chatKind.js';
 import { canonicalJidSql, cleanDisplayNameSql, contactDisplayNameSql, contactLeftJoins } from '../../lib/displayName.js';
 import { percentile } from '../../lib/percentile.js';
-import { parseLimit, scanCoverage, unixSecondsToIso } from '../../lib/query.js';
+import { nameLikePattern, parseLimit, scanCoverage, unixSecondsToIso } from '../../lib/query.js';
 import { resolveSelfJids } from '../../lib/selfIdentity.js';
 import {
   dateInTimezone,
@@ -527,10 +527,11 @@ interface GroupDirectoryRow {
  * Every group, with the roster size the chat list cannot show.
  */
 export function getGroupDirectory(
-  params: { limit?: unknown; sort?: unknown },
+  params: { limit?: unknown; sort?: unknown; q?: unknown },
   db: Database = getDb(),
 ): GroupDirectoryEntry[] {
   const limit = parseLimit(params.limit, 50, 500);
+  const like = nameLikePattern(params.q);
   const sort = params.sort === 'members' || params.sort === 'messages' ? params.sort : 'recent';
   const hasRoster = tableExists(db, 'group_participants');
   const hasGroupsTable = tableExists(db, 'groups');
@@ -540,17 +541,20 @@ export function getGroupDirectory(
     : sort === 'messages'
       ? 'messageCount DESC'
       : 'COALESCE(lastTs, 0) DESC';
+  const nameSql = `
+    COALESCE(
+      ${hasGroupsTable ? `${cleanDisplayNameSql('groups.name')},` : ''}
+      ${cleanDisplayNameSql('chats.name')},
+      ${cleanDisplayNameSql('MAX(messages.chat_name)')},
+      ${cleanDisplayNameSql('chats.jid')},
+      'Unknown'
+    )
+  `;
 
   const rows = db.prepare(`
     SELECT
       chats.jid AS jid,
-      COALESCE(
-        ${hasGroupsTable ? `${cleanDisplayNameSql('groups.name')},` : ''}
-        ${cleanDisplayNameSql('chats.name')},
-        ${cleanDisplayNameSql('MAX(messages.chat_name)')},
-        ${cleanDisplayNameSql('chats.jid')},
-        'Unknown'
-      ) AS name,
+      ${nameSql} AS name,
       ${hasRoster
         ? `(
             SELECT COUNT(DISTINCT ${canonicalJidSql('roster_contacts', 'group_participants.user_jid')})
@@ -568,9 +572,10 @@ export function getGroupDirectory(
     LEFT JOIN messages ON messages.chat_jid = chats.jid
     WHERE chats.kind = 'group'
     GROUP BY chats.jid
+    ${like ? `HAVING ${nameSql} LIKE @like ESCAPE '\\'` : ''}
     ORDER BY ${orderBy}
     LIMIT @limit
-  `).all({ limit }) as GroupDirectoryRow[];
+  `).all({ limit, like }) as GroupDirectoryRow[];
 
   return rows.map((row) => ({
     jid: row.jid,

@@ -1,3 +1,4 @@
+import { Link } from 'react-router-dom';
 import type { WeeklyRhythm } from '../../api/client';
 import { cn, formatNumber } from '../../lib/utils';
 import { Card, CardTitle, Skeleton } from '../ui/Card';
@@ -18,8 +19,15 @@ function intensityClass(count: number, max: number): string {
   return 'bg-emerald-700 dark:bg-emerald-400';
 }
 
+interface WeeklyRhythmCardProps {
+  data: WeeklyRhythm | null;
+  loading: boolean;
+  /** Where a slot with messages links to. */
+  slotPath?: (weekday: number, hour: number) => string;
+}
+
 /** Hour × weekday grid: when the week actually happens. */
-export function WeeklyRhythmCard({ data, loading }: { data: WeeklyRhythm | null; loading: boolean }) {
+export function WeeklyRhythmCard({ data, loading, slotPath }: WeeklyRhythmCardProps) {
   const counts = new Map((data?.cells ?? []).map((cell) => [cell.day * 24 + cell.hour, cell.count]));
   const max = data?.peak?.count ?? 0;
 
@@ -55,14 +63,20 @@ export function WeeklyRhythmCard({ data, loading }: { data: WeeklyRhythm | null;
                 {HOURS.map((hour) => {
                   const count = counts.get(day * 24 + hour) ?? 0;
                   const label = `${DAY_LABELS[day]} ${hour}:00 — ${formatNumber(count)} ${count === 1 ? 'message' : 'messages'}`;
-                  return (
-                    <div
-                      key={hour}
-                      role="gridcell"
-                      title={label}
-                      aria-label={label}
-                      className={cn('h-5 rounded-sm', intensityClass(count, max))}
-                    />
+                  const cellClass = cn('h-5 rounded-sm', intensityClass(count, max));
+                  return slotPath && count > 0 ? (
+                    <div key={hour} role="gridcell">
+                      {/* Out of the tab order for the same reason as the heatmap's days. */}
+                      <Link
+                        to={slotPath(day, hour)}
+                        tabIndex={-1}
+                        title={label}
+                        aria-label={label}
+                        className={cn('block hover:ring-2 hover:ring-slate-500', cellClass)}
+                      />
+                    </div>
+                  ) : (
+                    <div key={hour} role="gridcell" title={label} aria-label={label} className={cellClass} />
                   );
                 })}
               </div>

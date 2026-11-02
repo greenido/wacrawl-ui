@@ -1,32 +1,20 @@
 import type { ReactNode } from 'react';
+import { Link } from 'react-router-dom';
 import { Bar, BarChart, CartesianGrid, Tooltip, XAxis, YAxis } from 'recharts';
+import { clickedRow } from '../charts/chartClick';
 import { Card, CardTitle, ClickableCard, Skeleton } from './Card';
 
 /**
  * Card shells shared by every report.
  *
- * Each takes an optional `onDeepDive`, and becomes a link-role card when given
- * one — otherwise a plain card, so a report with nowhere to drill into does not
- * advertise a click target it does not have.
+ * Reports drill down from the row or bar that was clicked, to the messages behind
+ * it. Only a stat card links as a whole, to the list of what it counts.
  */
 
-interface DeepDivable {
+const CARD_SHELL = 'dark:border-slate-800 dark:bg-slate-900';
+
+interface StatCardProps {
   onDeepDive?: () => void;
-}
-
-function wrap(content: ReactNode, label: string, onDeepDive?: () => void, className?: string) {
-  const shell = className ?? 'dark:border-slate-800 dark:bg-slate-900';
-  if (onDeepDive) {
-    return (
-      <ClickableCard className={shell} onActivate={onDeepDive} aria-label={`Open ${label} deep dive`}>
-        {content}
-      </ClickableCard>
-    );
-  }
-  return <Card className={shell}>{content}</Card>;
-}
-
-interface StatCardProps extends DeepDivable {
   label: string;
   value: string;
   loading: boolean;
@@ -49,24 +37,46 @@ export function StatCard({ label, value, loading, onDeepDive }: StatCardProps) {
     </>
   );
 
-  return wrap(content, label, onDeepDive, '@container min-w-0 p-4 dark:border-slate-800 dark:bg-slate-900');
+  const shell = `@container min-w-0 p-4 ${CARD_SHELL}`;
+  if (onDeepDive) {
+    return (
+      <ClickableCard className={shell} onActivate={onDeepDive} aria-label={`Open ${label} deep dive`}>
+        {content}
+      </ClickableCard>
+    );
+  }
+  return <Card className={shell}>{content}</Card>;
 }
 
-interface CompactBarCardProps extends DeepDivable {
+interface CompactBarCardProps<Row> {
   title: string;
-  data: Array<Record<string, string | number>>;
+  /** Optional one-liner under the title. */
+  hint?: string;
+  data: Row[];
   dataKey: string;
   nameKey: string;
   loading: boolean;
+  onSelectRow?: (row: Row) => void;
 }
 
-export function CompactBarCard({ title, data, dataKey, nameKey, loading, onDeepDive }: CompactBarCardProps) {
-  const content = (
-    <>
+export function CompactBarCard<Row>({ title, hint, data, dataKey, nameKey, loading, onSelectRow }: CompactBarCardProps<Row>) {
+  return (
+    <Card className={CARD_SHELL}>
       <CardTitle className="dark:text-slate-50">{title}</CardTitle>
+      {hint ? <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{hint}</p> : null}
       {loading ? <Skeleton className="mt-4 h-64" /> : (
         <div className="mt-4 h-64 overflow-x-auto">
-          <BarChart width={520} height={256} data={data} margin={{ left: 0, right: 12, top: 12, bottom: 0 }}>
+          <BarChart
+            width={520}
+            height={256}
+            data={data}
+            margin={{ left: 0, right: 12, top: 12, bottom: 0 }}
+            style={onSelectRow ? { cursor: 'pointer' } : undefined}
+            onClick={(state) => {
+              const row = clickedRow(data, state);
+              if (row && onSelectRow) onSelectRow(row);
+            }}
+          >
             <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
             <XAxis dataKey={nameKey} tick={{ fontSize: 12 }} tickLine={false} axisLine={false} />
             <YAxis tick={{ fontSize: 12 }} tickLine={false} axisLine={false} width={36} />
@@ -75,37 +85,40 @@ export function CompactBarCard({ title, data, dataKey, nameKey, loading, onDeepD
           </BarChart>
         </div>
       )}
-    </>
+    </Card>
   );
-
-  return wrap(content, title, onDeepDive);
 }
 
-interface ListCardProps extends DeepDivable {
+interface ListCardProps {
   title: string;
   /** Optional one-liner explaining what the numbers mean. */
   hint?: string;
   children: ReactNode;
 }
 
-export function ListCard({ title, hint, children, onDeepDive }: ListCardProps) {
-  const content = (
-    <>
+export function ListCard({ title, hint, children }: ListCardProps) {
+  return (
+    <Card className={CARD_SHELL}>
       <CardTitle className="dark:text-slate-50">{title}</CardTitle>
       {hint ? <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{hint}</p> : null}
       <div className="mt-4 space-y-3">{children}</div>
-    </>
+    </Card>
   );
-
-  return wrap(content, title, onDeepDive);
 }
 
-/** One row of a list card: a name on the left, a figure on the right. */
-export function ListRow({ label, value, title }: { label: ReactNode; value: ReactNode; title?: string }) {
-  return (
-    <div className="flex items-center justify-between rounded-xl bg-slate-50 px-3 py-2 text-sm dark:bg-slate-800">
+/** One row of a list card: a name on the left, a figure on the right. `to` makes the whole row a link. */
+export function ListRow({ label, value, title, to }: { label: ReactNode; value: ReactNode; title?: string; to?: string }) {
+  const content = (
+    <>
       <span className="mr-2 truncate font-medium dark:text-slate-100">{label}</span>
       <span className="shrink-0 text-slate-500" title={title}>{value}</span>
-    </div>
+    </>
+  );
+  const rowClass = 'flex items-center justify-between rounded-xl bg-slate-50 px-3 py-2 text-sm dark:bg-slate-800';
+
+  return to ? (
+    <Link to={to} className={`${rowClass} transition hover:bg-slate-100 dark:hover:bg-slate-700`}>{content}</Link>
+  ) : (
+    <div className={rowClass}>{content}</div>
   );
 }

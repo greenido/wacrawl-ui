@@ -1,19 +1,21 @@
 import { Area, AreaChart, CartesianGrid, Tooltip, XAxis, YAxis } from 'recharts';
 import type { MessageVolumePoint } from '../../api/client';
-import { Card, CardTitle, ClickableCard, Skeleton } from '../ui/Card';
+import { Card, CardTitle, Skeleton } from '../ui/Card';
+import { clickedRow } from './chartClick';
 
 interface MessageVolumeAreaProps {
   data: MessageVolumePoint[];
   loading: boolean;
-  onDeepDive?: () => void;
+  /** Called with the first day of the clicked bucket. */
+  onSelectDate?: (date: string) => void;
 }
 
-export function MessageVolumeArea({ data, loading, onDeepDive }: MessageVolumeAreaProps) {
-  const content = (
-    <>
+export function MessageVolumeArea({ data, loading, onSelectDate }: MessageVolumeAreaProps) {
+  return (
+    <Card className="col-span-2">
       <div className="mb-4 flex items-center justify-between">
         <CardTitle>Message Volume</CardTitle>
-        <p className="text-sm text-slate-500">Sent vs received</p>
+        <p className="text-sm text-slate-500">Sent vs received{onSelectDate ? ' — click a point to see its messages' : ''}</p>
       </div>
       {loading ? (
         <Skeleton className="h-72" />
@@ -23,7 +25,17 @@ export function MessageVolumeArea({ data, loading, onDeepDive }: MessageVolumeAr
         </div>
       ) : (
         <div className="h-72 overflow-x-auto">
-          <AreaChart width={960} height={288} data={data} margin={{ left: 0, right: 12, top: 12, bottom: 0 }}>
+          <AreaChart
+            width={960}
+            height={288}
+            data={data}
+            margin={{ left: 0, right: 12, top: 12, bottom: 0 }}
+            style={onSelectDate ? { cursor: 'pointer' } : undefined}
+            onClick={(state) => {
+              const point = clickedRow(data, state);
+              if (point && onSelectDate) onSelectDate(point.date);
+            }}
+          >
               <defs>
                 <linearGradient id="sentGradient" x1="0" x2="0" y1="0" y2="1">
                   <stop offset="5%" stopColor="#22c55e" stopOpacity={0.35} />
@@ -43,16 +55,6 @@ export function MessageVolumeArea({ data, loading, onDeepDive }: MessageVolumeAr
           </AreaChart>
         </div>
       )}
-    </>
+    </Card>
   );
-
-  if (onDeepDive) {
-    return (
-      <ClickableCard className="col-span-2" onActivate={onDeepDive} aria-label="Open message volume deep dive">
-        {content}
-      </ClickableCard>
-    );
-  }
-
-  return <Card className="col-span-2">{content}</Card>;
 }

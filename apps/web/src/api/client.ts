@@ -108,6 +108,28 @@ export function absoluteApiUrl(path: string): string {
  */
 export const VIEWER_TIME_ZONE = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
+/** Bucket size the volume chart gets for a period; a drill-down has to widen a click back to it. */
+export function defaultVolumeGranularity(period: Period): 'day' | 'month' {
+  return period === 'year' || period === 'all' ? 'month' : 'day';
+}
+
+/** Everything `/api/search` can narrow by; all of it optional, all of it shown in the page URL. */
+export interface SearchFilters {
+  q?: string;
+  chat?: string;
+  /** A person's JID, or `me`. */
+  sender?: string;
+  /** Both directions with one person, as the Top Contacts chart counts them. */
+  contact?: string;
+  /** A media type, or `any`. */
+  mediaType?: string;
+  period?: Period;
+  from?: string;
+  to?: string;
+  hour?: string;
+  weekday?: string;
+}
+
 export const api = {
   health: () => request<HealthResponse>('/api/health'),
   pathsSettings: () => request<PathsSettingsResponse>('/api/settings/paths'),
@@ -128,7 +150,7 @@ export const api = {
     }),
   overview: () => request<OverviewStats>('/api/stats/overview'),
   topContacts: (period: Period, limit = 10) => request<TopContact[]>('/api/stats/top-contacts', { period, limit }),
-  messageVolume: (period: Period, granularity: 'day' | 'week' | 'month' = period === 'year' || period === 'all' ? 'month' : 'day') =>
+  messageVolume: (period: Period, granularity: 'day' | 'week' | 'month' = defaultVolumeGranularity(period)) =>
     request<MessageVolumePoint[]>('/api/stats/message-volume', { period, granularity, timeZone: VIEWER_TIME_ZONE }),
   activityHeatmap: (year = new Date().getFullYear()) =>
     request<ActivityHeatmapPoint[]>('/api/stats/activity-heatmap', { year, timeZone: VIEWER_TIME_ZONE }),
@@ -147,8 +169,8 @@ export const api = {
     request<ContactProfile>('/api/stats/contact-profile', { jid, limit, timeZone: VIEWER_TIME_ZONE }),
   groupProfile: (jid: string, limit = 15) =>
     request<GroupProfile>('/api/stats/group-profile', { jid, limit, timeZone: VIEWER_TIME_ZONE }),
-  groups: (sort: GroupSort = 'recent', limit = 200) =>
-    request<GroupDirectoryEntry[]>('/api/stats/groups', { sort, limit }),
+  groups: (sort: GroupSort = 'recent', limit = 200, q?: string) =>
+    request<GroupDirectoryEntry[]>('/api/stats/groups', { sort, limit, q: q || undefined }),
   dormancy: (limit = 12, kind: 'direct' | 'group' | 'all' = 'direct') =>
     request<DormancyReport>('/api/stats/dormancy', { limit, kind }),
   weeklyRhythm: (period: Period) =>
@@ -170,12 +192,14 @@ export const api = {
     request<ConversationDynamics>('/api/stats/conversation-dynamics', { period, limit, timeZone }),
   linkIntelligence: (period: Period, limit = 15) =>
     request<LinkIntelligence>('/api/stats/link-intelligence', { period, limit, timeZone: VIEWER_TIME_ZONE }),
-  people: (limit = 50, offset = 0) => request<ListResponse<PersonSummary>>('/api/people', { limit, offset }),
-  chats: (limit = 50, offset = 0, kind?: 'direct' | 'group', jid?: string) =>
-    request<ListResponse<ChatSummary>>('/api/chats', { limit, offset, kind, jid }),
+  people: (limit = 50, offset = 0, filters: { q?: string; jid?: string } = {}) =>
+    request<ListResponse<PersonSummary>>('/api/people', { limit, offset, q: filters.q || undefined, jid: filters.jid }),
+  chats: (limit = 50, offset = 0, kind?: 'direct' | 'group', jid?: string, q?: string) =>
+    request<ListResponse<ChatSummary>>('/api/chats', { limit, offset, kind, jid, q: q || undefined }),
   chatMessages: (jid: string, limit = 50, offset = 0) =>
     request<ListResponse<MessageSummary>>(`/api/chats/${encodeURIComponent(jid)}/messages`, { limit, offset }),
   messageOffset: (id: number) => request<{ chatJid: string; offset: number }>(`/api/messages/${id}/offset`),
   media: (limit = 60, offset = 0, type?: string) => request<ListResponse<MediaItem>>('/api/media', { limit, offset, type }),
-  search: (q: string, limit = 50, offset = 0) => request<ListResponse<SearchResult>>('/api/search', { q, limit, offset }),
+  search: (filters: SearchFilters, limit = 50, offset = 0) =>
+    request<ListResponse<SearchResult>>('/api/search', { ...filters, limit, offset, timeZone: VIEWER_TIME_ZONE }),
 };

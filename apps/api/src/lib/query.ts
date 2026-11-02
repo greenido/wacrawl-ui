@@ -27,6 +27,12 @@ export function parsePeriod(value: unknown): Period {
   return 'all';
 }
 
+/** `%value%` for a LIKE … ESCAPE '\\' test, or undefined when there is nothing to filter on. */
+export function nameLikePattern(value: unknown): string | undefined {
+  const text = typeof value === 'string' ? value.trim() : '';
+  return text ? `%${text.replace(/[\\%_]/g, (match) => `\\${match}`)}%` : undefined;
+}
+
 export function parseGranularity(value: unknown, fallback: Granularity): Granularity {
   if (value === 'day' || value === 'week' || value === 'month') {
     return value;

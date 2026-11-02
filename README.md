@@ -47,7 +47,8 @@ This generates a throwaway archive of invented messages in a temp folder, and de
 - **Overview cards.** Total messages, chats, contacts, media files and archive date span. Each card is also a shortcut to Search, Chats, People or Media.
 - **Time window.** The top-bar filter (**Day / Week / Month / Year / All**) drives the charts. It defaults to **Year**. The **activity heatmap** always shows the current calendar year.
 - **Timezone-aware.** Hour-of-day and heatmap buckets use *your* browser's timezone, not UTC. Your 11 p.m. texting habit is recorded at 11 p.m., where it belongs.
-- **Charts, charts, charts.** Message volume over time, top contacts (click one to jump to their chat), hour-of-day and day-of-week activity, monthly sent vs. received, media breakdown by count and bytes, top media senders, busiest groups, and messaging streaks (current and longest).
+- **Charts, charts, charts.** Message volume over time, top contacts, hour-of-day and day-of-week activity, monthly sent vs. received, media breakdown by count and bytes, top media senders, busiest groups, and messaging streaks (current and longest).
+- **Drill-downs.** Click a heatmap day, an hour or weekday bar, a weekly-rhythm slot, a volume or sent/received point, a top contact, or a media or group row to open the messages behind it in Search, scoped to the current period. Cards with nothing meaningful to filter by are no longer clickable.
 - **Weekly rhythm.** An hour × weekday grid, so "Sunday night" shows up as the peak it is instead of being averaged away into two separate bar charts.
 - **How fast replies happen.** Every point where a conversation changed hands, bucketed by reply time and split into **You** vs. **Them**. It's data now, so you can't say "I was busy."
 - **Drifted away.** People you used to message regularly who have gone quiet, comparing recent traffic against an earlier baseline. Mildly poignant. Maybe text them?
@@ -65,7 +66,7 @@ This generates a throwaway archive of invented messages in a temp folder, and de
 
 ### 👥 People and contact profiles
 
-- A contact list ranked by activity, with message, media, sent and received counts and the time of the last message. LID-style identifiers are hidden when showing them would reveal nothing useful.
+- A contact list ranked by activity, filterable by name (server-side, `?q=`), with message, media, sent and received counts and the time of the last message. LID-style identifiers are hidden when showing them would reveal nothing useful.
 - Click anyone to open their **profile** at `/contacts/:jid`:
   - **Balance.** Who does more of the talking.
   - **Turnaround.** How fast each of you replies.
@@ -76,7 +77,7 @@ This generates a throwaway archive of invented messages in a temp folder, and de
 
 ### 🗣️ Groups and group profiles
 
-- Every group, sortable by **Recently active**, **Most members** or **Most messages**.
+- Every group, filterable by name (`?q=`) and sortable by **Recently active**, **Most members** or **Most messages**.
 - **Group graveyard** (on the Dashboard). The share of your groups with no message in 180+ days, median group age, the oldest group still alive, groups founded per year split into *still active* vs. *silent*, and the once-loudest groups that went quiet.
 - Each group gets a **profile** at `/groups/:jid`:
   - **Who carries it.** The top talkers.
@@ -95,7 +96,8 @@ A Wrapped-style recap for any year in your archive (`/years/:year`): headline to
 
 - **Two-pane browser.** The conversation list on the left (direct vs. group, preview line, counts, last activity) and the messages on the right.
 - **Read-only inspection.** Message bubbles, timestamps, **copy message** (media-aware), and inline **images, videos and audio** when their paths resolve under your media root.
-- **Deep links.** `?contact=<jid>` preselects a chat, which is how the top-contacts chart jumps straight to a chat.
+- **Filters.** A name filter and an All / Direct / Groups switch above the list (`?q=`, `?kind=`). The open chat stays open while you filter.
+- **Deep links.** `?contact=<jid>` preselects a chat, which is how a search result jumps straight to its message.
 
 ### 🖼️ Media and links
 
@@ -110,7 +112,9 @@ A Wrapped-style recap for any year in your archive (`/years/:year`): headline to
 
 ### 🔎 Search
 
-- Full-text search (FTS5) over message content, chat names and sender names. Queries are debounced and start after two characters.
+- Full-text search (FTS5) over message content, chat names and sender names. Queries are debounced and start after two characters, or run with no text at all once a filter is set.
+- **Filters, kept in the URL.** Chat, sender (including yourself), media type, rolling period, date range, weekday and hour, read in your timezone. Results show the total count, load 50 more at a time, and highlight the matched terms.
+- `GET /api/search` takes `q`, `chat`, `sender` (a JID or `me`), `contact` (both directions with one person, as Top Contacts counts them), `mediaType` (a type or `any`), `period`, `from`, `to`, `hour`, `weekday` and `timeZone`. Invalid values return a `400`.
 - Results show context, image and video thumbnails, inline audio, clickable links, media badges and a copy button.
 
 ### ⚙️ Settings
