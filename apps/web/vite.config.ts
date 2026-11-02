@@ -10,6 +10,11 @@ export default defineConfig({
   preview: {
     host: '127.0.0.1',
     port: 4173,
+    // Production builds call their own origin. changeOrigin keeps the Host header
+    // on the API's allowlist.
+    proxy: {
+      '/api': { target: 'http://127.0.0.1:3001', changeOrigin: true },
+    },
   },
   build: {
     rollupOptions: {
