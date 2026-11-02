@@ -8,7 +8,13 @@ You can read more about it [here](https://greenido.dev/2026/05/21/unlock-whatsap
 
 Everything runs on your machine. The API binds to `127.0.0.1`, opens the archive **read-only**, and has no interest in phoning home. Your chats stay between you, your friends, and that one cousin who forwards chain messages.
 
-![WaCrawl Dashboard screenshot](docs/dashboard-2.png)
+![WaCrawl Dashboard, showing the invented demo archive](docs/dashboard.png)
+
+| Group profile | Year in Review |
+| :-- | :-- |
+| ![Group profile](docs/group-profile.png) | ![Year in Review](docs/year-in-review.png) |
+
+Every name and number in these screenshots is invented. They come from the demo archive below.
 
 ## Quick start
 
@@ -25,6 +31,14 @@ WACRAWL_DB=/path/to/wacrawl.db npx wacrawl-dashboard@latest
 ```
 
 No archive yet? Install [wacrawl](https://github.com/steipete/wacrawl) and run `wacrawl sync` first. The dashboard reads the archive; it doesn't create it.
+
+### Just looking?
+
+```bash
+npx wacrawl-dashboard@latest --demo
+```
+
+This generates a throwaway archive of invented messages in a temp folder, and deletes it when you quit. A **Demo data** badge stays in the top bar. It never reads `~/.wacrawl` or your `.env`, Refresh won't start `wacrawl sync`, and anything you change in Settings goes to a temp file rather than your saved settings.
 
 ## What's inside
 
@@ -152,7 +166,8 @@ apps/
   api/   Express 5 + better-sqlite3, read-only, TypeScript, Vitest
   web/   React + Vite + Tailwind + Recharts + Zustand
 bin/     the `npx wacrawl-dashboard` launcher (serves the built web app from the API)
-docs/    PRD, npm publishing notes, screenshot
+e2e/     Playwright smoke tests, screenshots and the fresh-install check
+docs/    PRD, npm publishing notes, screenshots
 ```
 
 ### API endpoints
@@ -179,13 +194,19 @@ The API runs on `http://127.0.0.1:3001` and Vite on `http://localhost:5173`.
 | `npm run build` | Production build (API, then web) |
 | `npm run preview` | Serve the built web app locally |
 | `npm test` | API unit tests (Vitest) |
+| `npm run demo` | Run the built app against a generated demo archive |
+| `npm run test:e2e` | Playwright smoke tests against the built app and demo archive (run `npm run build` first; `npx playwright install chromium` once) |
+| `npm run test:fresh-install` | Pack the build, install the tarball in a temp folder, and run `--demo` from it |
+| `npm run docs:screenshots` | Regenerate the README screenshots from the demo archive |
+| `npm run demo:generate -w @wacrawl/api -- --out <dir> --seed <n> --now <ISO date>` | Write a demo archive. The same seed and date give the same rows |
 | `npm run typecheck` | TypeScript checks for both workspaces |
 | `npm run lint` / `lint:fix` | ESLint |
-| `npm run verify` | Lint + typecheck + tests, the same gate CI runs |
+| `npm run verify` | Lint + typecheck + unit tests |
+| `npm run verify:full` | `verify`, then build, smoke tests and the fresh-install check: the same gate CI runs |
 
-CI (GitHub Actions) runs lint, typecheck, tests and build on every push and PR. Publishing a GitHub release ships to npm with provenance. See [docs/how to publish to npm.md](docs/how%20to%20publish%20to%20npm.md).
+CI (GitHub Actions) runs `verify:full`'s steps on Node 20, 22 and 24 on every push and PR. Publishing a GitHub release ships to npm with provenance. See [docs/how to publish to npm.md](docs/how%20to%20publish%20to%20npm.md).
 
-> **Test data note:** tests use a synthetic in-memory archive (`apps/api/src/__tests__/testDb.ts`). Please keep it that way. Nobody wants their real group chat immortalised in a test fixture.
+> **Test data note:** unit tests use a synthetic in-memory archive (`apps/api/src/__tests__/testDb.ts`), and smoke tests and screenshots use the generated one (`apps/api/src/demo/`). Please keep it that way. Nobody wants their real group chat immortalised in a test fixture.
 
 ## 🧩 Configuration
 
@@ -200,6 +221,7 @@ Copy `apps/api/.env.example` to `apps/api/.env` (and optionally `apps/web/.env.e
 | `WACRAWL_PATHS_FILE` | JSON file for UI-saved overrides. Default: `~/.wacrawl/dashboard-paths.json` |
 | `WACRAWL_BIN` | Path to the `wacrawl` executable if it's not on `PATH` |
 | `WACRAWL_DISABLE_SYNC` | Set to `1` and Refresh only reloads data. It never spawns `wacrawl sync` |
+| `WACRAWL_DEMO` | Set by `--demo`; turns on the **Demo data** badge. You shouldn't need to set it yourself |
 | `PORT` | API port. Default: `3001`. `npm run dev` and `npm run preview` expect `3001`; for another port under dev, also set `VITE_API_URL` |
 | `VITE_API_URL` (web) | API base URL. Default: `http://127.0.0.1:3001` under `npm run dev`, the page's own origin in a production build. A value set at build time is baked in |
 

@@ -8,4 +8,6 @@ dist/
 .env.*
 !.env.example
 coverage/
+test-results/
+playwright-report/
 .claude/settings.local.json

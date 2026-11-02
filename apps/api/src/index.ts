@@ -3,6 +3,7 @@ import 'dotenv/config';
 import express, { type ErrorRequestHandler } from 'express';
 import { ensurePrimaryDatabase } from './db.js';
 import { isMediaRootAccessible } from './lib/mediaFsPath.js';
+import { resolvePathsFromEnv } from './pathsResolve.js';
 import { dataRouter } from './routes/data.js';
 import { settingsRouter } from './routes/settings.js';
 import { statsRouter } from './routes/stats.js';
@@ -151,6 +152,9 @@ export function createApp(): express.Express {
 
     res.json({
       ok: primaryDbReadable,
+      // Settings can repoint a running demo at another archive, and a badge
+      // calling real messages "demo data" would be worse than no badge.
+      demo: process.env.WACRAWL_DEMO === '1' && paths.primaryDb === resolvePathsFromEnv().primaryDb,
       dbPath: paths.primaryDb,
       paths,
       mediaAccessible: mediaStatus.accessible,

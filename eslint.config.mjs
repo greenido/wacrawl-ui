@@ -11,6 +11,8 @@ export default tseslint.config(
       '**/node_modules/**',
       '**/coverage/**',
       'apps/web/public/**',
+      'test-results/**',
+      'playwright-report/**',
     ],
   },
 
@@ -54,7 +56,7 @@ export default tseslint.config(
 
   // CLIs and build scripts: stdout is the interface.
   {
-    files: ['bin/**/*.js', 'apps/api/src/scripts/**/*.ts', 'apps/web/scripts/**/*.mjs'],
+    files: ['bin/**/*.js', 'apps/api/src/scripts/**/*.ts', 'apps/web/scripts/**/*.mjs', 'e2e/**/*.mjs'],
     languageOptions: {
       globals: globals.node,
     },
