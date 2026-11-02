@@ -3,6 +3,7 @@ import 'dotenv/config';
 import express, { type ErrorRequestHandler } from 'express';
 import { ensurePrimaryDatabase } from './db.js';
 import { isMediaRootAccessible } from './lib/mediaFsPath.js';
+import { resolvePathsFromEnv } from './pathsResolve.js';
 import { dataRouter } from './routes/data.js';
 import { settingsRouter } from './routes/settings.js';
 import { statsRouter } from './routes/stats.js';
@@ -19,21 +20,27 @@ const ALLOWED_HOSTS = new Set([
 const LOOPBACK_HOSTNAMES = new Set(['localhost', '127.0.0.1', '[::1]', '::1']);
 
 /**
- * Accept any origin served from this machine.
+ * Accept any origin served from this machine. Development only: see createApp.
  *
  * Pinning the allowlist to ports 5173/4173 was brittle: Vite silently moves to
  * 5174 when 5173 is already taken, and from then on every request failed with an
  * opaque 500 that surfaced in the UI as "Cannot connect to the WaCrawl API".
- *
- * Widening to loopback costs little here — the server binds 127.0.0.1 and
- * enforces the Host allowlist above, so the only pages that can reach it are
- * ones already being served from this machine.
  */
 export function isLoopbackOrigin(origin: string): boolean {
   try {
     const { hostname, protocol } = new URL(origin);
     if (protocol !== 'http:' && protocol !== 'https:') return false;
     return LOOPBACK_HOSTNAMES.has(hostname);
+  } catch {
+    return false;
+  }
+}
+
+/** The dashboard this server is hosting, under either name for loopback. */
+function isOwnOrigin(origin: string): boolean {
+  try {
+    const { host, protocol } = new URL(origin);
+    return protocol === 'http:' && ALLOWED_HOSTS.has(host);
   } catch {
     return false;
   }
@@ -54,7 +61,7 @@ export const errorHandler: ErrorRequestHandler = (error, _req, res, next) => {
     res.status(403).json({
       error: {
         code: 'FORBIDDEN_ORIGIN',
-        message: `Blocked request from origin ${error.origin ?? 'unknown'}. The dashboard must be served from localhost.`,
+        message: `Blocked request from origin ${error.origin ?? 'unknown'}. Only the dashboard itself may call this API.`,
       },
     });
     return;
@@ -96,6 +103,12 @@ export const errorHandler: ErrorRequestHandler = (error, _req, res, next) => {
 
 export function createApp(): express.Express {
   const app = express();
+  // Production static file serving — set WACRAWL_STATIC_DIR to the web dist folder
+  const staticDir = process.env.WACRAWL_STATIC_DIR;
+  // A site on another local port (MAMP, any dev server) runs code the archive
+  // owner did not write, so it must not read the archive. Only development needs
+  // the wider rule, because the UI then comes from Vite on a port that can move.
+  const isAllowedOrigin = staticDir ? isOwnOrigin : isLoopbackOrigin;
 
   app.disable('x-powered-by');
 
@@ -119,7 +132,7 @@ export function createApp(): express.Express {
     origin(origin, callback) {
       // No Origin header: same-origin, or a non-browser client such as curl or
       // an <img> tag pointing at /api/media/file.
-      if (!origin || isLoopbackOrigin(origin)) {
+      if (!origin || isAllowedOrigin(origin)) {
         callback(null, true);
         return;
       }
@@ -146,6 +159,9 @@ export function createApp(): express.Express {
 
     res.json({
       ok: primaryDbReadable,
+      // Settings can repoint a running demo at another archive, and a badge
+      // calling real messages "demo data" would be worse than no badge.
+      demo: process.env.WACRAWL_DEMO === '1' && paths.primaryDb === resolvePathsFromEnv().primaryDb,
       dbPath: paths.primaryDb,
       paths,
       mediaAccessible: mediaStatus.accessible,
@@ -168,8 +184,6 @@ export function createApp(): express.Express {
     });
   });
 
-  // Production static file serving — set WACRAWL_STATIC_DIR to the web dist folder
-  const staticDir = process.env.WACRAWL_STATIC_DIR;
   if (staticDir) {
     app.use(express.static(staticDir));
     // SPA fallback: unmatched non-API GET requests return index.html
@@ -187,8 +201,19 @@ export function createApp(): express.Express {
   return app;
 }
 
-if (process.env.NODE_ENV !== 'test') {
-  createApp().listen(PORT, HOST, () => {
+/** Express 5 passes listen errors, such as a taken port, to the listen callback. */
+export function reportListenResult(error?: NodeJS.ErrnoException): void {
+  if (!error) {
     console.info(`WaCrawl API listening on http://${HOST}:${PORT}`);
-  });
+    return;
+  }
+
+  console.error(error.code === 'EADDRINUSE'
+    ? `Port ${PORT} is already in use. WaCrawl may already be running at http://${HOST}:${PORT}. Otherwise, choose another port with PORT=<port>.`
+    : `Could not start the WaCrawl API: ${error.message}`);
+  process.exitCode = 1;
+}
+
+if (process.env.NODE_ENV !== 'test') {
+  createApp().listen(PORT, HOST, reportListenResult);
 }

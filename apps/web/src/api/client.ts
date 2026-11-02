@@ -42,7 +42,8 @@ import type {
 
 export type * from '../../../api/src/types';
 
-const API_URL = import.meta.env.VITE_API_URL ?? 'http://127.0.0.1:3001';
+// A production build is served by the API itself, on whatever PORT it was given.
+const API_URL = import.meta.env.VITE_API_URL ?? (import.meta.env.DEV ? 'http://127.0.0.1:3001' : window.location.origin);
 
 export class ApiClientError extends Error {
   constructor(message: string, public status?: number) {

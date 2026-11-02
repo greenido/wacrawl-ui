@@ -611,6 +611,8 @@ export interface ResolvedArchivePaths {
 
 export interface HealthResponse {
   ok: boolean;
+  /** True while serving the synthetic archive from `wacrawl-dashboard --demo`. */
+  demo: boolean;
   dbPath: string;
   paths: ResolvedArchivePaths;
   mediaAccessible: boolean;

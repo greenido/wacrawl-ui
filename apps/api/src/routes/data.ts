@@ -3,7 +3,7 @@ import type { Database } from 'better-sqlite3';
 import { getDb } from '../db.js';
 import { chatKindSql, parseChatKind } from '../lib/chatKind.js';
 import { canonicalJidSql, cleanDisplayNameSql, contactDisplayNameSql, contactLeftJoins, isPersonJidSql } from '../lib/displayName.js';
-import { resolveArchiveMediaPath } from '../lib/mediaFsPath.js';
+import { mediaResponseHeaders, resolveArchiveMediaPath } from '../lib/mediaFsPath.js';
 import { nameLikePattern, parseLimit, parseOffset, unixSecondsToIso } from '../lib/query.js';
 import { parseSearchFilters, type SearchFilterParams } from '../lib/searchFilters.js';
 import { hasMessageSearchIndex, MESSAGE_SEARCH_FTS_TABLE } from '../lib/searchIndex.js';
@@ -539,7 +539,8 @@ dataRouter.get('/media/file', (req, res, next) => {
     return;
   }
 
-  res.sendFile(absolutePath, (err) => {
+  // Passed to sendFile rather than set here so an error response doesn't carry them.
+  res.sendFile(absolutePath, { headers: mediaResponseHeaders(absolutePath) }, (err) => {
     if (!err) return;
     const errCode = (err as NodeJS.ErrnoException).code;
 

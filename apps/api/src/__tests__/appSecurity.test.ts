@@ -14,6 +14,10 @@ let baseUrl: string;
 let tmpDir: string;
 let indexedMediaPath: string;
 let strayFilePath: string;
+let htmlAttachmentPath: string;
+let svgAttachmentPath: string;
+let pdfAttachmentPath: string;
+let missingAttachmentPath: string;
 
 /** Reserve a free port so the app's own localhost Host allowlist matches. */
 function freePort(): Promise<number> {
@@ -52,13 +56,27 @@ beforeAll(async () => {
   // Readable by the server, but no message row points at it.
   strayFilePath = path.join(tmpDir, 'secrets.txt');
   fs.writeFileSync(strayFilePath, 'not for the browser');
+  // Anyone can send these over WhatsApp, so they count as hostile.
+  htmlAttachmentPath = path.join(tmpDir, 'invoice final.html');
+  fs.writeFileSync(htmlAttachmentPath, '<script>fetch("/api/search?q=secret")</script>');
+  svgAttachmentPath = path.join(tmpDir, 'logo.svg');
+  fs.writeFileSync(svgAttachmentPath, '<svg xmlns="http://www.w3.org/2000/svg"><script>1</script></svg>');
+  pdfAttachmentPath = path.join(tmpDir, 'report.pdf');
+  fs.writeFileSync(pdfAttachmentPath, 'fake-pdf-bytes');
+  // Indexed by the archive, but never written to disk.
+  missingAttachmentPath = path.join(tmpDir, 'gone.html');
 
   const dbPath = path.join(tmpDir, 'archive.db');
   const db = createTestDb(dbPath);
-  db.prepare(`
+  const insertMedia = db.prepare(`
     INSERT INTO messages (source_pk, chat_jid, msg_id, ts, from_me, text, raw_type, media_type, media_path)
-    VALUES (100, 'alice@s.whatsapp.net', 'media-1', 1700000000, 0, NULL, 0, 'image', ?)
-  `).run(indexedMediaPath);
+    VALUES (?, 'alice@s.whatsapp.net', ?, 1700000000, 0, NULL, 0, ?, ?)
+  `);
+  insertMedia.run(100, 'media-1', 'image', indexedMediaPath);
+  insertMedia.run(101, 'media-2', 'document', htmlAttachmentPath);
+  insertMedia.run(102, 'media-3', 'document', svgAttachmentPath);
+  insertMedia.run(103, 'media-4', 'document', pdfAttachmentPath);
+  insertMedia.run(104, 'media-5', 'document', missingAttachmentPath);
   db.close();
 
   port = await freePort();
@@ -104,6 +122,22 @@ describe('CORS', () => {
     expect(response.status).toBe(403);
     expect(response.headers.get('access-control-allow-origin')).toBeNull();
   });
+
+  it('allows any loopback origin when the API is not serving the UI itself', async () => {
+    // Dev mode: Vite moves to another port when 5173 is taken.
+    const response = await fetch(`${baseUrl}/api/stats/overview`, {
+      headers: { Origin: 'http://localhost:5174' },
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('access-control-allow-origin')).toBe('http://localhost:5174');
+  });
+
+  it('blocks the opaque origin of a sandboxed page', async () => {
+    const response = await fetch(`${baseUrl}/api/stats/overview`, { headers: { Origin: 'null' } });
+
+    expect(response.status).toBe(403);
+  });
 });
 
 describe('GET /api/media/file', () => {
@@ -122,5 +156,45 @@ describe('GET /api/media/file', () => {
       expect(response.status).toBe(404);
       await expect(response.json()).resolves.toMatchObject({ error: { code: 'NOT_FOUND' } });
     }
+  });
+
+  it('downloads an HTML attachment instead of running it on the API origin', async () => {
+    const response = await fetch(mediaUrl(htmlAttachmentPath));
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('content-disposition')).toBe("attachment; filename*=UTF-8''invoice%20final.html");
+    expect(response.headers.get('content-security-policy')).toBe('sandbox');
+    expect(response.headers.get('x-content-type-options')).toBe('nosniff');
+  });
+
+  it('downloads an SVG attachment, which can carry script when opened directly', async () => {
+    const response = await fetch(mediaUrl(svgAttachmentPath));
+
+    expect(response.headers.get('content-disposition')).toMatch(/^attachment/);
+    expect(response.headers.get('content-security-policy')).toBe('sandbox');
+  });
+
+  it('keeps photos inline, sandboxed in case one is opened directly', async () => {
+    const response = await fetch(mediaUrl(indexedMediaPath));
+
+    expect(response.headers.get('content-disposition')).toBeNull();
+    expect(response.headers.get('content-security-policy')).toBe('sandbox');
+    expect(response.headers.get('x-content-type-options')).toBe('nosniff');
+  });
+
+  it('keeps PDFs viewable, since browser PDF viewers refuse a sandboxed document', async () => {
+    const response = await fetch(mediaUrl(pdfAttachmentPath));
+
+    expect(response.headers.get('content-type')).toBe('application/pdf');
+    expect(response.headers.get('content-disposition')).toBeNull();
+    expect(response.headers.get('content-security-policy')).toBeNull();
+    expect(response.headers.get('x-content-type-options')).toBe('nosniff');
+  });
+
+  it('does not mark an error response as a download', async () => {
+    const response = await fetch(mediaUrl(missingAttachmentPath));
+
+    expect(response.status).toBe(404);
+    expect(response.headers.get('content-disposition')).toBeNull();
   });
 });
