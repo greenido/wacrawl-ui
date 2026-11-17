@@ -1,15 +1,16 @@
-import Database from 'better-sqlite3';
 import { getDbPath } from '../db.js';
-import { createSearchIndexes } from '../lib/searchIndex.js';
+import { buildSearchIndexSync, searchIndexPath } from '../lib/searchIndex.js';
 
+/**
+ * Build the dashboard's search index ahead of time. The server builds it on its
+ * own when it is missing or stale, so this is only for warming it up front.
+ *
+ * The archive is opened readonly: the index goes to its own file.
+ */
 const dbPath = getDbPath();
-const db = new Database(dbPath, { fileMustExist: true });
+const indexPath = searchIndexPath();
 
-try {
-  const startedAt = Date.now();
-  createSearchIndexes(db);
-  const elapsedMs = Date.now() - startedAt;
-  console.log(`Optimized search indexes for ${dbPath} in ${elapsedMs}ms.`);
-} finally {
-  db.close();
-}
+const startedAt = Date.now();
+const meta = buildSearchIndexSync(dbPath, indexPath);
+const elapsedMs = Date.now() - startedAt;
+console.log(`Indexed ${meta.messages.toLocaleString('en-US')} messages from ${dbPath} into ${indexPath} in ${elapsedMs}ms.`);

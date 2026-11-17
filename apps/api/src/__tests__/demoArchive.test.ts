@@ -35,6 +35,7 @@ import {
 import { getChats, getMediaItems, getPeople, searchMessages } from '../routes/data.js';
 import { resolveSelfJids } from '../lib/selfIdentity.js';
 import { resolveArchiveMediaPath } from '../lib/mediaFsPath.js';
+import { buildSearchIndexSync, searchIndexStatus } from '../lib/searchIndex.js';
 
 const FIXED_NOW = new Date('2026-06-15T12:00:00.000Z');
 
@@ -252,10 +253,18 @@ describe('demo archive fills every report', () => {
     expect(chats.some((chat) => chat.kind === 'dm')).toBe(true);
   });
 
-  it('search uses the full-text index and finds the fixed messages', () => {
+  it('search finds the fixed messages before and after the sidecar index is built', () => {
+    // Like a real archive, the demo ships without the dashboard's index.
+    expect(db.prepare("SELECT COUNT(*) FROM sqlite_master WHERE name LIKE '%fts%'").pluck().get()).toBe(0);
+    const unindexed = searchMessages({ q: 'lighthouse' }, db);
+
+    const meta = buildSearchIndexSync(archive.dbPath);
+    expect(meta.messages).toBe(getOverviewStats(db).totalMessages);
+    expect(searchIndexStatus(archive.dbPath).state).toBe('ready');
+
     const results = searchMessages({ q: 'lighthouse' }, db);
     expect(results.pagination.total).toBeGreaterThanOrEqual(3);
     expect(results.data.map((hit) => hit.chatName)).toContain('Ada Lovelace');
-    expect(db.prepare('SELECT COUNT(*) FROM messages_fts').pluck().get()).toBe(getOverviewStats(db).totalMessages);
+    expect(results.pagination.total).toBe(unindexed.pagination.total);
   });
 });
