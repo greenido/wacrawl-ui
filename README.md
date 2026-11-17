@@ -63,6 +63,7 @@ This generates a throwaway archive of invented messages in a temp folder, and de
   - **Late-night texters.** Who you talk to between midnight and 5 a.m. No judgement. Some judgement.
   - **Relationship trajectory.** A monthly sparkline per contact showing whether things are *growing*, *fading* or *stable*.
 - **Loading splash.** Rotating quotes to keep you company while SQLite does the heavy lifting.
+- **Export the chart data.** **CSV** or **JSON** buttons above the charts save the numbers behind them, for the period you're looking at. The CSV is one long table (`chart, label, series, value`) that any spreadsheet can pivot; the JSON is everything the dashboard loaded, as the API returned it.
 
 ### 👥 People and contact profiles
 
@@ -92,6 +93,8 @@ This generates a throwaway archive of invented messages in a temp folder, and de
 
 A Wrapped-style recap for any year in your archive (`/years/:year`): headline totals, busiest day and month, a year-over-year comparison, top chats, chats that started that year, and a media summary. It's like Spotify Wrapped, except you are the artist and the song is "sorry, just saw this."
 
+**Export as image** saves the recap as a 1080 × 1350 PNG, ready to post. **Hide names** is on by default: contacts and groups become *Contact 1*, *Group 1* and so on, and top words (which are often names) are left out. The image is drawn in your browser; nothing is uploaded anywhere.
+
 ### 💬 Chats
 
 - **Two-pane browser.** The conversation list on the left (direct vs. group, preview line, counts, last activity) and the messages on the right.
@@ -113,8 +116,11 @@ A Wrapped-style recap for any year in your archive (`/years/:year`): headline to
 ### 🔎 Search
 
 - Full-text search (FTS5) over message content, chat names and sender names. Queries are debounced and start after two characters, or run with no text at all once a filter is set.
+- **The search index is the dashboard's own file, never part of your archive.** See [Search index](#-search-index).
+- **Export the results.** **CSV** or **JSON** saves every match for the current query and filters, not just the loaded page, up to 20,000 messages (newest first). Cells that a spreadsheet would run as a formula (`=`, `+`, `-`, `@`) are written as text, because anyone in a chat can type one.
 - **Filters, kept in the URL.** Chat, sender (including yourself), media type, rolling period, date range, weekday and hour, read in your timezone. Results show the total count, load 50 more at a time, and highlight the matched terms.
 - `GET /api/search` takes `q`, `chat`, `sender` (a JID or `me`), `contact` (both directions with one person, as Top Contacts counts them), `mediaType` (a type or `any`), `period`, `from`, `to`, `hour`, `weekday` and `timeZone`. Invalid values return a `400`.
+- `GET /api/search/export?format=csv|json` takes the same parameters and answers with `Content-Disposition: attachment`. `X-Total-Count`, `X-Export-Count` and `X-Export-Truncated` say whether the 20,000-row cap cut it short.
 - Results show context, image and video thumbnails, inline audio, clickable links, media badges and a copy button.
 
 ### ⚙️ Settings
@@ -156,7 +162,7 @@ We've taken more care with this than your group chat takes with spoilers.
 
 - The API listens on **`127.0.0.1` only**. When it serves the dashboard itself (`npx wacrawl-dashboard`), only that dashboard's own origin may call it, so a site on another local port can't read your archive. Under `npm run dev` and `npm run preview`, any loopback origin is allowed, because the UI comes from Vite on a port that can move.
 - **Attachments can't run in the dashboard.** Photos, video, audio and PDFs open in the browser. Anything else, including HTML and SVG, downloads instead, because anyone can send you a file and the API serves it from the same origin as your archive.
-- The archive is opened **read-only**. `/api/health` reports whether the DB is readable and which paths it resolved.
+- The archive is opened **read-only**. `/api/health` reports whether the DB is readable and which paths it resolved. The search index is a separate file the dashboard writes itself; it never touches the archive.
 - `POST /api/sync` is the only route that starts a process, so it requires an **`X-Wacrawl-Request: 1`** header. CORS stops a cross-origin page from *reading* a response, but not from *sending* a simple POST. A non-simple header forces a preflight, and the origin check rejects it. The CLI is spawned without a shell and with a fixed argument list.
 - Set `WACRAWL_DISABLE_SYNC=1` and the API never spawns anything at all.
 - Stats responses are cached in memory, keyed on the archive's path, mtime and size, with a 5-minute TTL. Re-syncing or switching archives invalidates the cache.
@@ -178,7 +184,7 @@ docs/    PRD, npm publishing notes, screenshots
 
 | Area | Routes |
 | :-- | :-- |
-| **Data** | `/api/people`, `/api/chats`, `/api/chats/:jid/messages`, `/api/media`, `/api/media/file`, `/api/search`, `/api/messages/:id/offset` |
+| **Data** | `/api/people`, `/api/chats`, `/api/chats/:jid/messages`, `/api/media`, `/api/media/file`, `/api/search`, `/api/search/export`, `/api/messages/:id/offset` |
 | **Stats** | `/api/stats/` + `overview`, `top-contacts`, `message-volume`, `activity-heatmap`, `hour-of-day`, `day-of-week`, `media-breakdown`, `media-senders`, `sent-received-ratio`, `response-times`, `reply-latency`, `group-activity`, `streaks`, `word-cloud`, `emoji-analytics`, `conversation-dynamics`, `year-in-review`, `contact-profile`, `dormancy`, `groups`, `group-profile`, `link-intelligence`, `weekly-rhythm`, `distinctive-words`, `group-lifecycle`, `archived-chats` |
 | **Sync** | `GET /api/sync/status`, `POST /api/sync` (returns `202`, or `409` if an import is already running) |
 | **Settings** | `GET`/`POST /api/settings/paths` |
@@ -223,6 +229,7 @@ Copy `apps/api/.env.example` to `apps/api/.env` (and optionally `apps/web/.env.e
 | `WACRAWL_CHAT_DB` / `WACRAWL_CONTACTS_DB` | Explicit paths to `ChatStorage.sqlite` and `ContactsV2.sqlite` |
 | `WACRAWL_MEDIA_ROOT` | Folder with downloaded media (often `…/Message/Media`). Relative archive paths resolve against it |
 | `WACRAWL_PATHS_FILE` | JSON file for UI-saved overrides. Default: `~/.wacrawl/dashboard-paths.json` |
+| `WACRAWL_SEARCH_INDEX` | The dashboard's search index file. Default: `dashboard-index.db` next to the paths file, so `~/.wacrawl/dashboard-index.db` (and inside the throwaway folder under `--demo`) |
 | `WACRAWL_BIN` | Path to the `wacrawl` executable if it's not on `PATH` |
 | `WACRAWL_DISABLE_SYNC` | Set to `1` and Refresh only reloads data. It never spawns `wacrawl sync` |
 | `WACRAWL_DEMO` | Set by `--demo`; turns on the **Demo data** badge. You shouldn't need to set it yourself |
@@ -237,23 +244,21 @@ Run the API once against another archive:
 WACRAWL_DB=/path/to/wacrawl.db npm run dev -w @wacrawl/api
 ```
 
-## ⚡ Search optimization (probably not needed)
+## 🔎 Search index
 
-**Recent wacrawl versions don't need this.** wacrawl 0.3.9+ builds and maintains its own `messages_fts(text, chat, sender, media)` table on every import, so Search stays current after each Refresh. Check whether yours has it:
+Search runs on an SQLite FTS5 index that the dashboard keeps in **its own file**, `~/.wacrawl/dashboard-index.db` by default (`WACRAWL_SEARCH_INDEX` moves it). Your archive stays read-only: the index is built from a read-only connection and attached, read-only too, when a search runs. Nothing is added to or dropped from the archive, so it can't clash with the `messages_fts` table that wacrawl 0.3.9+ maintains on its own.
 
-```bash
-sqlite3 ~/.wacrawl/wacrawl.db "SELECT COUNT(*) FROM messages_fts;"
-```
+- **Built for you.** On first start, and whenever the archive changes (its path, size or modification time, including the WAL), the API rebuilds the index in the background. A successful **Refresh** rebuilds it too.
+- **Never in the way.** The build works through the archive in small batches and yields between them, so the dashboard stays responsive on a large archive. Until the new index is ready, search uses wacrawl's own `messages_fts` if the archive has one, and a plain `LIKE` scan if not: slower, but complete.
+- **Disposable.** Delete the file whenever you like; it comes back on the next start. It is roughly the size of your message text.
 
-If that errors, your archive is from an older wacrawl, and you can add indexes and an FTS5 table yourself:
+To build it ahead of time, without starting the server:
 
 ```bash
 npm run optimize-db -w @wacrawl/api
 ```
 
-(Prefix it with `WACRAWL_DB=/path/to/wacrawl.db` to target another archive.)
-
-⚠️ `optimize-db` adds btree indexes (`idx_messages_chat_jid`, `idx_contacts_jid`, `idx_contacts_lid`), but it also **drops and replaces** `messages_fts` with a five-column version of its own. On a wacrawl that maintains its own FTS table, that replacement may not survive the next import, and may break it. Only run it on archives that don't ship an FTS table.
+(Prefix it with `WACRAWL_DB=/path/to/wacrawl.db` to index another archive.) Earlier versions of `optimize-db` wrote indexes and a `messages_fts` table *into the archive*; it no longer does. If you ran it before, wacrawl's next import is free to replace that table, and the dashboard doesn't depend on it.
 
 ## 🙏 Credits
 

@@ -1,4 +1,5 @@
 import Database from 'better-sqlite3';
+import { ensureSearchIndex } from './lib/searchIndex.js';
 import { getResolvedPaths } from './runtimePaths.js';
 
 let db: Database.Database | null = null;
@@ -17,6 +18,13 @@ export function ensurePrimaryDatabase(): Database.Database {
     readonly: true,
   });
   cachedPrimaryDb = key;
+  // A new archive (startup, or a path change in Settings) gets its search index
+  // built in the background if it has none yet. Search works without it.
+  try {
+    ensureSearchIndex(paths.primaryDb);
+  } catch (error) {
+    console.warn(`Could not start the search index build: ${error instanceof Error ? error.message : String(error)}`);
+  }
   return db;
 }
 

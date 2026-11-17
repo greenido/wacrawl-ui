@@ -6,6 +6,8 @@ import { TextWithLinks } from '../components/MessageContent';
 import { EntityPicker, type PickerOption } from '../components/search/EntityPicker';
 import { Card, Skeleton } from '../components/ui/Card';
 import { CopyButton } from '../components/ui/CopyButton';
+import { ExportButtons, type ExportFormat } from '../components/ui/ExportButtons';
+import { downloadBlob } from '../lib/download';
 import { Highlight } from '../components/ui/Highlight';
 import { MediaPlaceholder, useMediaError } from '../components/ui/MediaPlaceholder';
 import { useUrlTextFilter } from '../hooks/useUrlTextFilter';
@@ -144,6 +146,8 @@ export function Search() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [mediaTypes, setMediaTypes] = useState<MediaBreakdownStat[]>([]);
+  /** Tied to the search it describes, so it disappears when the search changes. */
+  const [exportNote, setExportNote] = useState<{ key: string; text: string } | null>(null);
 
   const chatLabel = useResolvedName(filters.chat, chatName);
   const senderLabel = useResolvedName(filters.sender, personName);
@@ -199,6 +203,22 @@ export function Search() {
       })
       .catch((err: Error) => setError(err.message))
       .finally(() => setLoadingMore(false));
+  }
+
+  async function exportResults(format: ExportFormat) {
+    setExportNote(null);
+    try {
+      const file = await api.exportSearch(request, format);
+      downloadBlob(file.blob, file.filename);
+      if (file.truncated) {
+        setExportNote({
+          key: requestKey,
+          text: `Exported the newest ${formatNumber(file.exported)} of ${formatNumber(file.total)} matches, the most one file holds. Narrow the search to export the rest.`,
+        });
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
   }
 
   function setFilters(changes: Partial<Record<keyof SearchFilters, string | undefined>>) {
@@ -375,10 +395,16 @@ export function Search() {
           </div>
         ) : (
           <>
-            <p className="mb-2 text-sm text-slate-500 dark:text-slate-400" aria-live="polite">
-              {formatNumber(current.total)} {current.total === 1 ? 'message' : 'messages'}
-              {current.results.length < current.total ? ` · showing the newest ${formatNumber(current.results.length)}` : ''}
-            </p>
+            <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+              <p className="text-sm text-slate-500 dark:text-slate-400" aria-live="polite">
+                {formatNumber(current.total)} {current.total === 1 ? 'message' : 'messages'}
+                {current.results.length < current.total ? ` · showing the newest ${formatNumber(current.results.length)}` : ''}
+              </p>
+              <ExportButtons subject="all matching messages" onExport={exportResults} />
+            </div>
+            {exportNote?.key === requestKey ? (
+              <p role="status" className="mb-2 text-xs text-amber-700 dark:text-amber-400">{exportNote.text}</p>
+            ) : null}
             <div className="divide-y divide-slate-100 dark:divide-slate-800">
               {current.results.map((result) => (
                 <article

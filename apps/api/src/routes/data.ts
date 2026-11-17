@@ -6,7 +6,8 @@ import { canonicalJidSql, cleanDisplayNameSql, contactDisplayNameSql, contactLef
 import { mediaResponseHeaders, resolveArchiveMediaPath } from '../lib/mediaFsPath.js';
 import { nameLikePattern, parseLimit, parseOffset, unixSecondsToIso } from '../lib/query.js';
 import { parseSearchFilters, type SearchFilterParams } from '../lib/searchFilters.js';
-import { hasMessageSearchIndex, MESSAGE_SEARCH_FTS_TABLE } from '../lib/searchIndex.js';
+import { toCsv, type CsvColumn } from '../lib/csv.js';
+import { ARCHIVE_FTS_TABLE, attachSearchIndex, hasArchiveFtsTable, SIDECAR_FTS_TABLE, SIDECAR_SCHEMA } from '../lib/searchIndex.js';
 import type { ChatSummary, ListResponse, MediaItem, MessageSummary, PersonSummary, SearchResult } from '../types.js';
 
 interface CountRow {
@@ -404,10 +405,31 @@ const SEARCH_JOINS_SQL = `
   ${contactLeftJoins('sender_contacts', 'messages.sender_jid')}
 `;
 
-export function searchMessages(params: SearchFilterParams & { q?: unknown; limit?: unknown; offset?: unknown }, db: Database = getDb()): ListResponse<SearchResult> {
+/** Where an FTS query can run: `from` goes in FROM, `name` in MATCH and snippet(). */
+interface FtsSource {
+  from: string;
+  name: string;
+}
+
+/**
+ * The dashboard's own sidecar index first, then wacrawl's FTS table inside the
+ * archive. Either may be absent, and the sidecar is missing while it builds.
+ */
+function ftsSources(db: Database): FtsSource[] {
+  const sources: FtsSource[] = [];
+  if (attachSearchIndex(db)) {
+    sources.push({ from: `${SIDECAR_SCHEMA}.${SIDECAR_FTS_TABLE}`, name: SIDECAR_FTS_TABLE });
+  }
+  if (hasArchiveFtsTable(db)) {
+    sources.push({ from: `main.${ARCHIVE_FTS_TABLE}`, name: ARCHIVE_FTS_TABLE });
+  }
+  return sources;
+}
+
+type SearchParams = SearchFilterParams & { q?: unknown; limit?: unknown; offset?: unknown };
+
+function runSearch(params: SearchParams, limit: number, offset: number, db: Database): ListResponse<SearchResult> {
   const query = typeof params.q === 'string' ? params.q.trim() : '';
-  const limit = parseLimit(params.limit, 50, 100);
-  const offset = parseOffset(params.offset);
   const { conditions, bindings } = parseSearchFilters(params, db);
 
   // A filter is a question in its own right, so only an unfiltered search needs
@@ -433,21 +455,21 @@ export function searchMessages(params: SearchFilterParams & { q?: unknown; limit
   }
 
   const ftsQuery = buildFtsQuery(query);
-  if (ftsQuery && hasMessageSearchIndex(db)) {
+  for (const fts of ftsQuery ? ftsSources(db) : []) {
     try {
       const total = (db.prepare(`
         SELECT COUNT(*) AS count
-        FROM ${MESSAGE_SEARCH_FTS_TABLE}
-        JOIN messages ON messages.rowid = ${MESSAGE_SEARCH_FTS_TABLE}.rowid
-        WHERE ${MESSAGE_SEARCH_FTS_TABLE} MATCH @ftsQuery ${andFilters}
+        FROM ${fts.from}
+        JOIN messages ON messages.rowid = ${fts.name}.rowid
+        WHERE ${fts.name} MATCH @ftsQuery ${andFilters}
       `).get({ ...bindings, ftsQuery }) as CountRow).count;
       const rows = db.prepare(`
         WITH matched AS (
           SELECT
             rowid,
-            snippet(${MESSAGE_SEARCH_FTS_TABLE}, -1, '', '', '...', 20) AS snippet
-          FROM ${MESSAGE_SEARCH_FTS_TABLE}
-          WHERE ${MESSAGE_SEARCH_FTS_TABLE} MATCH @ftsQuery
+            snippet(${fts.name}, -1, '', '', '...', 20) AS snippet
+          FROM ${fts.from}
+          WHERE ${fts.name} MATCH @ftsQuery
         )
         SELECT
           ${SEARCH_COLUMNS_SQL},
@@ -462,7 +484,7 @@ export function searchMessages(params: SearchFilterParams & { q?: unknown; limit
 
       return formatSearchResults(rows, query, limit, offset, total);
     } catch {
-      // If an older archive has an incompatible FTS table, keep search working.
+      // An FTS table of an unexpected shape: try the next source, then LIKE.
     }
   }
 
@@ -492,6 +514,92 @@ export function searchMessages(params: SearchFilterParams & { q?: unknown; limit
   `).all({ ...bindings, like, limit, offset }) as SearchMessageRow[];
 
   return formatSearchResults(rows, query, limit, offset, total);
+}
+
+export function searchMessages(params: SearchParams, db: Database = getDb()): ListResponse<SearchResult> {
+  return runSearch(params, parseLimit(params.limit, 50, 100), parseOffset(params.offset), db);
+}
+
+/** Enough for any real question; past it a spreadsheet is the wrong tool anyway. */
+export const SEARCH_EXPORT_MAX_ROWS = 20_000;
+
+export type ExportFormat = 'csv' | 'json';
+
+export interface SearchExport {
+  format: ExportFormat;
+  filename: string;
+  contentType: string;
+  body: string;
+  total: number;
+  exported: number;
+  truncated: boolean;
+}
+
+const SEARCH_EXPORT_COLUMNS: Array<CsvColumn<SearchResult>> = [
+  { header: 'sent_at', value: (row) => row.sentAt },
+  { header: 'chat', value: (row) => row.chatName },
+  { header: 'chat_jid', value: (row) => row.chatJid },
+  { header: 'sender', value: (row) => (row.fromMe ? 'You' : row.senderName) },
+  { header: 'sender_jid', value: (row) => row.senderJid },
+  { header: 'from_me', value: (row) => row.fromMe },
+  { header: 'message_type', value: (row) => row.messageType },
+  { header: 'media_type', value: (row) => row.mediaType },
+  { header: 'text', value: (row) => row.text },
+  { header: 'message_id', value: (row) => row.id },
+];
+
+function parseExportFormat(value: unknown): ExportFormat {
+  const format = typeof value === 'string' ? value.trim().toLowerCase() : 'csv';
+  if (format === 'csv' || format === 'json') return format;
+  throw Object.assign(new Error('format must be csv or json.'), { code: 'VALIDATION_ERROR' });
+}
+
+/**
+ * Every match for the same params as `/api/search`, not just the loaded page,
+ * up to SEARCH_EXPORT_MAX_ROWS (newest first).
+ */
+export function exportSearchResults(
+  params: SearchParams & { format?: unknown },
+  db: Database = getDb(),
+  now = new Date(),
+): SearchExport {
+  const format = parseExportFormat(params.format);
+  const result = runSearch(params, SEARCH_EXPORT_MAX_ROWS, 0, db);
+  // The snippet is a display aid; the export carries the full text instead.
+  const rows = result.data.map(({ snippet: _snippet, ...row }) => row);
+  const total = result.pagination.total;
+  const truncated = total > rows.length;
+  const filename = `wacrawl-search-${now.toISOString().slice(0, 10)}.${format}`;
+
+  if (format === 'csv') {
+    return {
+      format,
+      filename,
+      contentType: 'text/csv; charset=utf-8',
+      body: toCsv(SEARCH_EXPORT_COLUMNS, result.data),
+      total,
+      exported: rows.length,
+      truncated,
+    };
+  }
+
+  const { format: _format, limit: _limit, offset: _offset, ...query } = params;
+  return {
+    format,
+    filename,
+    contentType: 'application/json; charset=utf-8',
+    body: `${JSON.stringify({
+      exportedAt: now.toISOString(),
+      query,
+      total,
+      exported: rows.length,
+      truncated,
+      messages: rows,
+    }, null, 2)}\n`,
+    total,
+    exported: rows.length,
+    truncated,
+  };
 }
 
 export const dataRouter = Router();
@@ -574,6 +682,22 @@ dataRouter.get('/media/file', (req, res, next) => {
 
 dataRouter.get('/search', (req, res) => {
   res.json(searchMessages(req.query));
+});
+
+dataRouter.get('/search/export', (req, res) => {
+  const result = exportSearchResults(req.query);
+  res.set({
+    'Content-Type': result.contentType,
+    'Content-Disposition': `attachment; filename="${result.filename}"`,
+    'Cache-Control': 'no-store',
+    'X-Total-Count': String(result.total),
+    'X-Export-Count': String(result.exported),
+    'X-Export-Truncated': String(result.truncated),
+    // Under `npm run dev` the page is on another port, and fetch only sees
+    // headers CORS lets through.
+    'Access-Control-Expose-Headers': 'X-Total-Count, X-Export-Count, X-Export-Truncated',
+  });
+  res.send(result.body);
 });
 
 dataRouter.get('/messages/:id/offset', (req, res) => {
