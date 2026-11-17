@@ -130,23 +130,29 @@ export interface SearchFilters {
   weekday?: string;
 }
 
+// Every request that changes state sends this. It is what the API uses to tell a
+// dashboard request apart from a cross-origin POST; without it the request is refused.
+const DASHBOARD_REQUEST_HEADERS = { 'X-Wacrawl-Request': '1' };
+
 export const api = {
   health: () => request<HealthResponse>('/api/health'),
   pathsSettings: () => request<PathsSettingsResponse>('/api/settings/paths'),
   pathsSettingsSave: (body: Partial<Record<keyof ResolvedArchivePaths, string>>) =>
     jsonRequest<{ ok: boolean; effective: ResolvedArchivePaths }>('/api/settings/paths', {
       method: 'POST',
+      headers: DASHBOARD_REQUEST_HEADERS,
       body: JSON.stringify(body),
     }),
   pathsSettingsReset: () =>
-    jsonRequest<{ ok: boolean; effective: ResolvedArchivePaths }>('/api/settings/paths', { method: 'DELETE' }),
+    jsonRequest<{ ok: boolean; effective: ResolvedArchivePaths }>('/api/settings/paths', {
+      method: 'DELETE',
+      headers: DASHBOARD_REQUEST_HEADERS,
+    }),
   syncStatus: () => request<SyncStatusResponse>('/api/sync/status'),
-  // The header is what the API uses to tell a dashboard request apart from a
-  // cross-origin POST; without it the request is refused.
   startSync: () =>
     jsonRequest<{ job: SyncJobStatus }>('/api/sync', {
       method: 'POST',
-      headers: { 'X-Wacrawl-Request': '1' },
+      headers: DASHBOARD_REQUEST_HEADERS,
     }),
   overview: () => request<OverviewStats>('/api/stats/overview'),
   topContacts: (period: Period, limit = 10) => request<TopContact[]>('/api/stats/top-contacts', { period, limit }),

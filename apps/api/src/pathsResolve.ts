@@ -1,5 +1,4 @@
 import fs from 'node:fs';
-import type { IncomingHttpHeaders } from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -122,7 +121,7 @@ function patchPick(patch: PathPatch, key: keyof PathPatch): string | undefined {
   return t ? expandPath(t) : undefined;
 }
 
-/** Layer overrides onto base (env → dashboard file → …). Later callers may merge headers the same way. */
+/** Layer overrides onto base (env → dashboard file). */
 export function mergePathPatch(base: ResolvedPaths, patch: PathPatch): ResolvedPaths {
   const whatsappContainer = patchPick(patch, 'whatsappContainer') ?? base.whatsappContainer;
 
@@ -157,35 +156,16 @@ export function mergePathPatch(base: ResolvedPaths, patch: PathPatch): ResolvedP
   };
 }
 
-function headerString(headers: IncomingHttpHeaders, lowerName: string): string | undefined {
-  const v = headers[lowerName];
-  const raw = Array.isArray(v) ? v[0] : v;
-  if (typeof raw !== 'string' || !raw.trim()) return undefined;
-  return expandPath(raw.trim());
-}
-
-/** Optional per-request overrides from the UI (fetch API); `<img>` tags cannot send these—prefer POST /api/settings/paths. */
-export function mergeHeaderPathOverrides(headers: IncomingHttpHeaders, base: ResolvedPaths): ResolvedPaths {
-  const patch: PathPatch = {};
-  const c = headerString(headers, 'x-wacrawl-whatsapp-container');
-  const chat = headerString(headers, 'x-wacrawl-chat-db');
-  const contacts = headerString(headers, 'x-wacrawl-contacts-db');
-  const media = headerString(headers, 'x-wacrawl-media-root');
-  const primary = headerString(headers, 'x-wacrawl-db');
-  if (c !== undefined) patch.whatsappContainer = c;
-  if (chat !== undefined) patch.chatDb = chat;
-  if (contacts !== undefined) patch.contactsDb = contacts;
-  if (media !== undefined) patch.mediaRoot = media;
-  if (primary !== undefined) patch.primaryDb = primary;
-  if (Object.keys(patch).length === 0) return base;
-  return mergePathPatch(base, patch);
-}
-
-export function resolvePathsForRequest(headers: IncomingHttpHeaders): ResolvedPaths {
-  let resolved = resolvePathsFromEnv();
+/**
+ * The paths every request uses: env defaults with the saved Settings layered on.
+ *
+ * Requests used to be able to override these with `X-Wacrawl-*` headers. Nothing
+ * sent them, and they let any caller that passed the origin check point the
+ * server at an arbitrary database, while swapping the one shared connection
+ * back and forth between callers.
+ */
+export function resolveEffectivePaths(): ResolvedPaths {
+  const resolved = resolvePathsFromEnv();
   const stored = readDashboardPathsOverride();
-  if (stored) {
-    resolved = mergePathPatch(resolved, stored);
-  }
-  return mergeHeaderPathOverrides(headers, resolved);
+  return stored ? mergePathPatch(resolved, stored) : resolved;
 }

@@ -8,7 +8,7 @@ import { dataRouter } from './routes/data.js';
 import { settingsRouter } from './routes/settings.js';
 import { statsRouter } from './routes/stats.js';
 import { syncRouter } from './routes/sync.js';
-import { getResolvedPaths, pathsMiddleware } from './runtimePaths.js';
+import { getResolvedPaths } from './runtimePaths.js';
 
 const PORT = Number(process.env.PORT ?? 3001);
 const HOST = '127.0.0.1';
@@ -17,7 +17,35 @@ const ALLOWED_HOSTS = new Set([
   `127.0.0.1:${PORT}`,
 ]);
 
-const LOOPBACK_HOSTNAMES = new Set(['localhost', '127.0.0.1', '[::1]', '::1']);
+/**
+ * Headers for the dashboard page itself.
+ *
+ * Without frame-ancestors, any website could load 127.0.0.1 in a hidden frame
+ * and trick a click on Refresh or Save in Settings. The CSP also keeps any
+ * future injection bug from loading script or sending data anywhere else.
+ * Inline styles stay allowed because React and Recharts set style attributes;
+ * data: and blob: images cover generated favicons and exported images.
+ */
+export const PAGE_SECURITY_HEADERS: Readonly<Record<string, string>> = {
+  'Content-Security-Policy': [
+    "default-src 'self'",
+    "script-src 'self'",
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data: blob:",
+    "media-src 'self' blob:",
+    "font-src 'self' data:",
+    "connect-src 'self'",
+    "object-src 'none'",
+    "base-uri 'none'",
+    "form-action 'self'",
+    "frame-ancestors 'none'",
+  ].join('; '),
+  'X-Frame-Options': 'DENY',
+  'X-Content-Type-Options': 'nosniff',
+  'Referrer-Policy': 'no-referrer',
+};
+
+const LOOPBACK_HOSTNAMES =new Set(['localhost', '127.0.0.1', '[::1]', '::1']);
 
 /**
  * Accept any origin served from this machine. Development only: see createApp.
@@ -143,8 +171,6 @@ export function createApp(): express.Express {
     },
   }));
 
-  app.use(pathsMiddleware);
-
   app.get('/api/health', (_req, res) => {
     const paths = getResolvedPaths();
     let primaryDbReadable = false;
@@ -185,6 +211,11 @@ export function createApp(): express.Express {
   });
 
   if (staticDir) {
+    // Everything past the /api handlers is the dashboard page and its assets.
+    app.use((_req, res, next) => {
+      res.set(PAGE_SECURITY_HEADERS);
+      next();
+    });
     app.use(express.static(staticDir));
     // SPA fallback: unmatched non-API GET requests return index.html
     app.use((req, res, next) => {
