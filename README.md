@@ -128,6 +128,7 @@ A Wrapped-style recap for any year in your archive (`/years/:year`): headline to
 - Edit **archive paths** (WhatsApp shared container, primary WaCrawl DB, chat DB, contacts DB, media root), then **save** or **reset to `.env` defaults**.
 - A **health** banner tells you whether the primary database opens, and at which resolved path.
 - Overrides are saved to `~/.wacrawl/dashboard-paths.json`, so `<img>` and `<video>` URLs work without custom browser headers.
+- Paths must be absolute (or start with `~/`). A new primary database must be an SQLite file that already exists. Run `wacrawl sync` once to create a new archive, then point the dashboard at it.
 
 ### 🔄 Refresh
 
@@ -163,7 +164,9 @@ We've taken more care with this than your group chat takes with spoilers.
 - The API listens on **`127.0.0.1` only**. When it serves the dashboard itself (`npx wacrawl-dashboard`), only that dashboard's own origin may call it, so a site on another local port can't read your archive. Under `npm run dev` and `npm run preview`, any loopback origin is allowed, because the UI comes from Vite on a port that can move.
 - **Attachments can't run in the dashboard.** Photos, video, audio and PDFs open in the browser. Anything else, including HTML and SVG, downloads instead, because anyone can send you a file and the API serves it from the same origin as your archive.
 - The archive is opened **read-only**. `/api/health` reports whether the DB is readable and which paths it resolved. The search index is a separate file the dashboard writes itself; it never touches the archive.
-- `POST /api/sync` is the only route that starts a process, so it requires an **`X-Wacrawl-Request: 1`** header. CORS stops a cross-origin page from *reading* a response, but not from *sending* a simple POST. A non-simple header forces a preflight, and the origin check rejects it. The CLI is spawned without a shell and with a fixed argument list.
+- Routes that change state (`POST /api/sync`, and saving or resetting paths under `/api/settings/paths`) require an **`X-Wacrawl-Request: 1`** header. CORS stops a cross-origin page from *reading* a response, but not from *sending* a simple POST. A non-simple header forces a preflight, and the origin check rejects it. The CLI is spawned without a shell and with a fixed argument list.
+- Archive paths come only from `.env` and the saved Settings. No request can point the server at another database.
+- **The dashboard can't be framed.** The page is served with `X-Frame-Options: DENY` and a Content-Security-Policy (`frame-ancestors 'none'`, scripts from its own origin only), so another site can't load it in a hidden frame and trick you into clicking Refresh or Save.
 - Set `WACRAWL_DISABLE_SYNC=1` and the API never spawns anything at all.
 - Stats responses are cached in memory, keyed on the archive's path, mtime and size, with a 5-minute TTL. Re-syncing or switching archives invalidates the cache.
 

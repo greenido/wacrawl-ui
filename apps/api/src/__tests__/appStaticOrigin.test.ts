@@ -96,3 +96,23 @@ describe('CORS when the API serves its own UI', () => {
     await expect(response.text()).resolves.toContain('dashboard');
   });
 });
+
+describe('page security headers', () => {
+  it('stop other sites from framing the dashboard and lock down what it loads', async () => {
+    for (const pathname of ['/', '/people', '/index.html']) {
+      const response = await fetch(`${baseUrl}${pathname}`);
+      const csp = response.headers.get('content-security-policy') ?? '';
+
+      expect(response.headers.get('x-frame-options'), pathname).toBe('DENY');
+      expect(csp, pathname).toContain("frame-ancestors 'none'");
+      expect(csp, pathname).toContain("script-src 'self'");
+      expect(response.headers.get('referrer-policy'), pathname).toBe('no-referrer');
+    }
+  });
+
+  it('are not added to API responses', async () => {
+    const response = await fetch(`${baseUrl}/api/stats/overview`);
+
+    expect(response.headers.get('x-frame-options')).toBeNull();
+  });
+});
