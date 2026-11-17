@@ -1,7 +1,7 @@
 import { format } from 'date-fns';
 import { CartesianGrid, Line, LineChart, Tooltip, XAxis, YAxis } from 'recharts';
 import { Link, useNavigate } from 'react-router-dom';
-import { defaultVolumeGranularity, type OverviewStats } from '../api/client';
+import { defaultVolumeGranularity, VIEWER_TIME_ZONE, type OverviewStats } from '../api/client';
 import { ActivityHeatmap } from '../components/charts/ActivityHeatmap';
 import { clickedRow } from '../components/charts/chartClick';
 import { MessageVolumeArea } from '../components/charts/MessageVolumeArea';
@@ -16,9 +16,12 @@ import { ReplyLatencyCard } from '../components/reports/ReplyLatencyCard';
 import { WeeklyRhythmCard } from '../components/reports/WeeklyRhythmCard';
 import { WordCloudCard } from '../components/reports/WordCloudCard';
 import { Card, CardTitle, Skeleton } from '../components/ui/Card';
+import { ExportButtons, type ExportFormat } from '../components/ui/ExportButtons';
 import { CompactBarCard, ListCard, ListRow, StatCard } from '../components/ui/cards';
 import { QuotesLoader } from '../components/ui/QuotesLoader';
 import { useDashboardData } from '../hooks/useDashboardData';
+import { dashboardCsv, dashboardJson } from '../lib/dashboardExport';
+import { downloadText, fileDate } from '../lib/download';
 import { bucketRange, searchPath } from '../lib/searchLinks';
 import { formatBytes, formatDuration, formatNumber } from '../lib/utils';
 import { useAppStore } from '../store/appStore';
@@ -51,6 +54,12 @@ export function Dashboard() {
   const messagesPath = (filters: Parameters<typeof searchPath>[0]) => searchPath({ ...filters, period });
   const openBucket = (date: string, granularity: 'day' | 'month') => navigate(messagesPath(bucketRange(date, granularity)));
 
+  function exportCharts(format: ExportFormat) {
+    const filename = `wacrawl-dashboard-${period}-${fileDate()}.${format}`;
+    if (format === 'csv') downloadText(dashboardCsv(data), filename, 'text/csv;charset=utf-8');
+    else downloadText(dashboardJson(data, period, VIEWER_TIME_ZONE), filename, 'application/json');
+  }
+
   if (error && !overview && topContacts.length === 0 && messageVolume.length === 0) {
     return (
       <main className="p-8">
@@ -80,6 +89,11 @@ export function Dashboard() {
           <StatCard label="Media Files" value={formatNumber(overview?.totalMediaFiles ?? 0)} loading={loadingOverview} onDeepDive={() => navigate('/media')} />
           <StatCard label="Archive Range" value={formatDateRange(overview)} loading={loadingOverview} onDeepDive={() => navigate('/years')} />
         </section>
+
+        <div className="flex items-center justify-end gap-3">
+          <span className="text-xs text-slate-500 dark:text-slate-400">Chart data for this period</span>
+          <ExportButtons subject="dashboard chart data" onExport={exportCharts} disabled={loadingOverview || loadingCharts} />
+        </div>
 
         {error ? (
           <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">{error}</div>

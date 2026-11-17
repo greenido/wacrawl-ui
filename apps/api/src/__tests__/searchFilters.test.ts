@@ -1,7 +1,7 @@
+import fs from 'node:fs';
 import type Database from 'better-sqlite3';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, onTestFinished } from 'vitest';
 import { SearchFilterError } from '../lib/searchFilters.js';
-import { createSearchIndexes } from '../lib/searchIndex.js';
 import { getChats, getPeople, searchMessages } from '../routes/data.js';
 import { getGroupDirectory } from '../routes/stats/profiles.js';
 import {
@@ -12,7 +12,7 @@ import {
   getMediaSenders,
   getTopContacts,
 } from '../routes/stats.js';
-import { createTestDb } from './testDb.js';
+import { createIndexedTestDb, createTestDb } from './testDb.js';
 
 let db: Database.Database | null = null;
 
@@ -122,8 +122,11 @@ describe('searchMessages filters', () => {
   });
 
   it('combines filters with text, on the FTS path', () => {
-    db = createTestDb();
-    createSearchIndexes(db);
+    const indexed = createIndexedTestDb();
+    db = indexed.db;
+    onTestFinished(() => fs.rmSync(indexed.dir, { recursive: true, force: true }));
+    // Only FTS matches terms that are not next to each other.
+    expect(msgIds({ q: 'hello update' })).toEqual(['m1']);
 
     expect(msgIds({ q: 'family', sender: 'me' })).toEqual(['m4']);
     expect(searchMessages({ q: 'family', sender: 'me' }, db).pagination.total).toBe(1);

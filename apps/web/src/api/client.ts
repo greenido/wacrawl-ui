@@ -40,6 +40,8 @@ import type {
   YearInReview,
 } from '../../../api/src/types';
 
+import { fileDate } from '../lib/download';
+
 export type * from '../../../api/src/types';
 
 // A production build is served by the API itself, on whatever PORT it was given.
@@ -134,6 +136,44 @@ export interface SearchFilters {
 // dashboard request apart from a cross-origin POST; without it the request is refused.
 const DASHBOARD_REQUEST_HEADERS = { 'X-Wacrawl-Request': '1' };
 
+export interface SearchExportFile {
+  blob: Blob;
+  filename: string;
+  /** Matches in all; the file holds at most the API's export cap of them. */
+  total: number;
+  exported: number;
+  truncated: boolean;
+}
+
+/** Every match for these filters, as a file; not just the page on screen. */
+async function exportSearch(filters: SearchFilters, format: 'csv' | 'json'): Promise<SearchExportFile> {
+  const url = new URL('/api/search/export', API_URL);
+  for (const [key, value] of Object.entries({ ...filters, format, timeZone: VIEWER_TIME_ZONE })) {
+    if (value !== undefined && value !== '') url.searchParams.set(key, String(value));
+  }
+
+  const response = await fetch(url);
+  if (!response.ok) {
+    let message = `Export failed with status ${response.status}`;
+    try {
+      const body = await response.json() as { error?: { message?: string } };
+      message = body.error?.message ?? message;
+    } catch {
+      // Keep the generic HTTP message if the response is not JSON.
+    }
+    throw new ApiClientError(message, response.status);
+  }
+
+  return {
+    blob: await response.blob(),
+    // Named here rather than from Content-Disposition, whose date is the server's UTC one.
+    filename: `wacrawl-search-${fileDate()}.${format}`,
+    total: Number(response.headers.get('X-Total-Count') ?? 0),
+    exported: Number(response.headers.get('X-Export-Count') ?? 0),
+    truncated: response.headers.get('X-Export-Truncated') === 'true',
+  };
+}
+
 export const api = {
   health: () => request<HealthResponse>('/api/health'),
   pathsSettings: () => request<PathsSettingsResponse>('/api/settings/paths'),
@@ -208,4 +248,5 @@ export const api = {
   media: (limit = 60, offset = 0, type?: string) => request<ListResponse<MediaItem>>('/api/media', { limit, offset, type }),
   search: (filters: SearchFilters, limit = 50, offset = 0) =>
     request<ListResponse<SearchResult>>('/api/search', { ...filters, limit, offset, timeZone: VIEWER_TIME_ZONE }),
+  exportSearch,
 };

@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 
 import { closeDb, getDb } from '../db.js';
+import { rebuildSearchIndex } from './searchIndex.js';
 import { clearStatsCache } from './statsCache.js';
 
 /**
@@ -118,6 +119,9 @@ export function startSync(dbPath: string): { started: boolean; job: SyncJobStatu
       // cached stat was computed from the old contents.
       closeDb();
       clearStatsCache();
+      // New messages are not searchable through the old index; until the
+      // rebuild lands, search falls back rather than missing them.
+      void rebuildSearchIndex(dbPath);
     }
 
     job = {

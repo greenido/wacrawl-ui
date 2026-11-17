@@ -2,7 +2,6 @@ import fs from 'node:fs';
 import path from 'node:path';
 import Database from 'better-sqlite3';
 import { ARCHIVE_SCHEMA_SQL } from '../lib/archiveSchema.js';
-import { createSearchIndexes } from '../lib/searchIndex.js';
 import {
   CAPTIONS,
   DIRECT_PERSONAS,
@@ -484,7 +483,15 @@ export function generateDemoArchive(options: DemoArchiveOptions): DemoArchive {
       insertState.run('source_path', 'demo');
     })();
 
-    createSearchIndexes(db);
+    // The btree indexes a real wacrawl archive carries. Full-text search is not
+    // baked in: the dashboard builds its own sidecar index on first start, the
+    // same way it does for a real archive.
+    db.exec(`
+      CREATE INDEX idx_messages_chat_jid ON messages(chat_jid);
+      CREATE INDEX idx_messages_ts ON messages(ts DESC);
+      CREATE INDEX idx_messages_chat_ts ON messages(chat_jid, ts DESC);
+      CREATE INDEX idx_contacts_lid ON contacts(lid);
+    `);
 
     return {
       dbPath,

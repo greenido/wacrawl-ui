@@ -1,14 +1,17 @@
+import fs from 'node:fs';
 import type Database from 'better-sqlite3';
 import { afterEach, describe, expect, it } from 'vitest';
-import { createSearchIndexes } from '../lib/searchIndex.js';
 import { getChatMessages, getChats, getMediaItems, getPeople, searchMessages } from '../routes/data.js';
-import { createTestDb } from './testDb.js';
+import { createIndexedTestDb, createTestDb } from './testDb.js';
 
 let db: Database.Database | null = null;
+let tmpDir: string | null = null;
 
 afterEach(() => {
   db?.close();
   db = null;
+  if (tmpDir) fs.rmSync(tmpDir, { recursive: true, force: true });
+  tmpDir = null;
 });
 
 describe('data queries', () => {
@@ -94,13 +97,14 @@ describe('data queries', () => {
     expect(results.data[0].snippet.toLowerCase()).toContain('family');
   });
 
-  it('uses the FTS search index when it is available', () => {
-    db = createTestDb();
-    createSearchIndexes(db);
-    db.prepare('UPDATE contacts SET full_name = ? WHERE jid = ?').run('Renamed Contact', 'alice@s.whatsapp.net');
+  it('uses the sidecar search index when it is available', () => {
+    ({ db, dir: tmpDir } = createIndexedTestDb());
 
+    // Terms anywhere in the message: only FTS can answer this, LIKE needs the phrase.
+    expect(searchMessages({ q: 'hello update', limit: '10' }, db).data.map((result) => result.msgId)).toEqual(['m1']);
+
+    // Contact names are indexed too, under the chat they belong to.
     const results = searchMessages({ q: 'example', limit: '10' }, db);
-
     expect(results.data).toHaveLength(3);
     expect(results.data.every((result) => result.chatJid === 'alice@s.whatsapp.net')).toBe(true);
     expect(results.data[0]).toMatchObject({

@@ -1,5 +1,9 @@
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import Database from 'better-sqlite3';
 import { ARCHIVE_SCHEMA_SQL } from '../lib/archiveSchema.js';
+import { buildSearchIndexSync } from '../lib/searchIndex.js';
 
 /** Schema only, so a test can supply message fixtures shaped for what it measures. */
 export function createEmptyDb(target = ':memory:'): Database.Database {
@@ -39,4 +43,16 @@ export function createTestDb(target = ':memory:'): Database.Database {
   insertMessage.run(6, 'alice@s.whatsapp.net', 'Alice', 'm6', null, null, 1_700_432_000, 1, 'reply after photo', 0, 'text', null, null, null);
 
   return db;
+}
+
+/**
+ * The fixture archive on disk with its sidecar search index built, opened
+ * readonly the way the server opens a real archive. Remove `dir` when done.
+ */
+export function createIndexedTestDb(): { db: Database.Database; dir: string; archivePath: string } {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wacrawl-indexed-'));
+  const archivePath = path.join(dir, 'archive.db');
+  createTestDb(archivePath).close();
+  buildSearchIndexSync(archivePath);
+  return { db: new Database(archivePath, { readonly: true, fileMustExist: true }), dir, archivePath };
 }

@@ -1,4 +1,5 @@
 import { format } from 'date-fns';
+import { ImageDown } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
@@ -6,7 +7,9 @@ import { api, type OverviewStats, type YearInReview as Review } from '../api/cli
 import { Card, CardTitle, Skeleton } from '../components/ui/Card';
 import { ListCard, ListRow, StatCard } from '../components/ui/cards';
 import { ScanNote } from '../components/ui/ScanNote';
+import { downloadBlob } from '../lib/download';
 import { formatBytes, formatNumber, cn } from '../lib/utils';
+import { yearReviewPng } from '../lib/yearReviewImage';
 import { useAppStore } from '../store/appStore';
 
 function archiveYears(overview: OverviewStats | null): number[] {
@@ -27,6 +30,10 @@ export function YearInReview() {
   const [overview, setOverview] = useState<OverviewStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // On by default: the image is made to be shared, and the people in it did not agree to that.
+  const [hideNames, setHideNames] = useState(true);
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -66,11 +73,48 @@ export function YearInReview() {
   }, [dataVersion, year]);
 
   const years = archiveYears(overview);
+  const canExport = !loading && review !== null && review.year === year && review.totals.messages > 0;
+
+  async function exportImage() {
+    if (!review) return;
+    setExporting(true);
+    setExportError(null);
+    try {
+      const blob = await yearReviewPng(review, { hideNames });
+      downloadBlob(blob, `wacrawl-${review.year}-in-review.png`);
+    } catch (err) {
+      setExportError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setExporting(false);
+    }
+  }
 
   return (
     <main className="space-y-6 p-8">
       <header className="space-y-3">
-        <h1 className="text-3xl font-bold text-slate-950 dark:text-slate-50">{year} in review</h1>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h1 className="text-3xl font-bold text-slate-950 dark:text-slate-50">{year} in review</h1>
+          <div className="flex items-center gap-3">
+            <label className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-300" title="Contacts and groups become Contact 1, Group 1, …; top words are left out">
+              <input
+                type="checkbox"
+                checked={hideNames}
+                onChange={(event) => setHideNames(event.target.checked)}
+                className="h-4 w-4 accent-brand-600"
+              />
+              Hide names
+            </label>
+            <button
+              type="button"
+              onClick={() => void exportImage()}
+              disabled={!canExport || exporting}
+              className="flex items-center gap-2 rounded-full bg-brand-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-brand-500 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <ImageDown className="h-4 w-4" aria-hidden="true" />
+              {exporting ? 'Exporting…' : 'Export as image'}
+            </button>
+          </div>
+        </div>
         <div className="flex flex-wrap gap-2">
           {years.map((value) => (
             <button
@@ -92,6 +136,9 @@ export function YearInReview() {
 
       {error ? (
         <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-900">{error}</div>
+      ) : null}
+      {exportError ? (
+        <div role="alert" className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-900">{exportError}</div>
       ) : null}
 
       {loading || !review ? (
